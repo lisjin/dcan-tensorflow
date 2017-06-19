@@ -1,10 +1,11 @@
-function topIndices = fmeasureAll()
+function [fmVals, imgNamesAll] = fmeasureAll()
 NUM_IMAGES = 1536;
 dirs = getDirNames('BBBC*images*');
 fmVals = ones(numel(dirs), NUM_IMAGES);
+imgNamesAll = cell(1, numel(dirs));
 
 addpath('../../Documents/MATLAB/fmeasure/');
-disp(['Processing directory...']);
+disp('Processing directory...');
 for i = 1:numel(dirs)
     disp(i);
 
@@ -21,7 +22,4 @@ for i = 1:numel(dirs)
         fmVals(i, j) = fmeasure(img, 'WAVS');
     end
 end
-
-topIndices = fmArgmax(fmVals, imgNamesAll);
-save('topIndices', 'topIndices');
 end
