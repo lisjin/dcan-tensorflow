@@ -1,6 +1,9 @@
 function saveImgs(topIndices)
+% Using topIndices (first column is z-index, second is image file name),
+% save corresponding images in output directory.
+
 NUM_IMGS = 768;
-OUT_DIR = 'BBBC006_focused2';
+OUT_DIR = 'BBBC006_v1_focused';
 mkdir(OUT_DIR);
 
 for i = 1:NUM_IMGS

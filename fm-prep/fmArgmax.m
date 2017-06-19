@@ -1,4 +1,7 @@
 function topIndices = fmArgmax(fmVals, imgNamesAll)
+% Use argmax of each column of fmVals (13x768) to get z-index with best
+% focus measure. Save this index along with image name in topIndices.
+
 IDX_OFFSET = 10;
 numImgs = size(imgNamesAll{1}, 2);
 

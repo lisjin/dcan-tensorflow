@@ -1,4 +1,7 @@
 function [fmVals, imgNamesAll] = fmeasureAll()
+% Use fmeasure function to detect focus measures of all 13x768 Hoescht
+% images. Save these in fmVals, and all image names in imgNamesAll.
+
 NUM_IMAGES = 1536;
 dirs = getDirNames('BBBC*images*');
 fmVals = ones(numel(dirs), NUM_IMAGES);

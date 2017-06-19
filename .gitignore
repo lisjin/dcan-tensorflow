@@ -1,5 +1,11 @@
-.DS_Store
+# Data
 BBBC006*/
-sftp-config.json
-*.mat
+checkpoints/
+data/
 
+*.mat
+*.pyc
+
+# Files
+sftp-config.json
+.DS_Store
