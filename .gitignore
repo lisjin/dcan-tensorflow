@@ -2,6 +2,7 @@
 BBBC006*/
 checkpoints/
 data/
+.idea/
 
 *.mat
 *.pyc
