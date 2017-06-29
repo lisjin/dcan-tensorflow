@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Builds the CIFAR-10 network."""
+"""Builds the BBBC006 network."""
 # pylint: disable=missing-docstring
 from __future__ import absolute_import
 from __future__ import division
@@ -31,12 +31,12 @@ FLAGS = tf.app.flags.FLAGS
 # Basic model parameters.
 tf.app.flags.DEFINE_integer('batch_size', 128,
                             """Number of images to process in a batch.""")
-tf.app.flags.DEFINE_string('data_dir', '/tmp/bbbc006_data',
-                           """Path to the CIFAR-10 data directory.""")
+tf.app.flags.DEFINE_string('data_dir', 'data',
+                           """Path to the BBBC006 data directory.""")
 tf.app.flags.DEFINE_boolean('use_fp16', False,
                             """Train the model using fp16.""")
 
-# Global constants describing the CIFAR-10 data set.
+# Global constants describing the BBBC006 data set.
 IMAGE_SIZE = bbbc006_input.IMAGE_SIZE
 NUM_CLASSES = bbbc006_input.NUM_CLASSES
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
@@ -52,8 +52,6 @@ INITIAL_LEARNING_RATE = 0.1  # Initial learning rate.
 # to differentiate the operations. Note that this prefix is removed from the
 # names of the summaries when visualizing a model.
 TOWER_NAME = 'tower'
-
-DATA_URL = 'http://www.cs.toronto.edu/~kriz/cifar-10-binary.tar.gz'
 
 
 def _activation_summary(x):
@@ -131,7 +129,7 @@ def distorted_inputs():
     """
     if not FLAGS.data_dir:
         raise ValueError('Please supply a data_dir')
-    data_dir = os.path.join(FLAGS.data_dir, 'cifar-10-batches-bin')
+    data_dir = os.path.join(FLAGS.data_dir)
     images, labels = bbbc006_input.distorted_inputs(data_dir=data_dir,
                                                     batch_size=FLAGS.batch_size)
     if FLAGS.use_fp16:
@@ -155,7 +153,7 @@ def inputs(eval_data):
     """
     if not FLAGS.data_dir:
         raise ValueError('Please supply a data_dir')
-    data_dir = os.path.join(FLAGS.data_dir, 'cifar-10-batches-bin')
+    data_dir = os.path.join(FLAGS.data_dir)
     images, labels = bbbc006_input.inputs(eval_data=eval_data,
                                           data_dir=data_dir,
                                           batch_size=FLAGS.batch_size)
@@ -166,7 +164,7 @@ def inputs(eval_data):
 
 
 def inference(images):
-    """Build the CIFAR-10 model.
+    """Build the BBBC006 model.
 
     Args:
       images: Images returned from distorted_inputs() or inputs().
@@ -276,7 +274,7 @@ def loss(logits, labels):
 
 
 def _add_loss_summaries(total_loss):
-    """Add summaries for losses in CIFAR-10 model.
+    """Add summaries for losses in BBBC006 model.
 
     Generates moving average for all losses and associated summaries for
     visualizing the performance of the network.
@@ -303,7 +301,7 @@ def _add_loss_summaries(total_loss):
 
 
 def train(total_loss, global_step):
-    """Train CIFAR-10 model.
+    """Train BBBC006 model.
 
     Create an optimizer and apply to all trainable variables. Add moving
     average for all trainable variables.

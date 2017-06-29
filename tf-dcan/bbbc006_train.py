@@ -13,7 +13,7 @@
 # limitations under the License.
 # ==============================================================================
 
-"""A binary to train CIFAR-10 using a single GPU."""
+"""A binary to train BBBC006 using a single GPU."""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -44,8 +44,8 @@ def train():
         global_step = tf.contrib.framework.get_or_create_global_step()
 
         # Get images and labels for CIFAR-10.
-        # Force input pipeline to CPU:0 to avoid operations sometimes ending up on
-        # GPU and resulting in a slow down.
+        # Force input pipeline to CPU:0 to avoid operations sometimes ending up
+        # on GPU and resulting in a slow down.
         with tf.device('/cpu:0'):
             images, labels = bbbc006.distorted_inputs()
 

@@ -1,5 +1,5 @@
 addpath('../fm-prep');
-IN_DIR = '../fm-prep/BBBC006_v1_labels/';
+IN_DIR = 'BBBC006_v1_labels/';
 OUT_DIR_C = 'BBBC006_v1_contours';
 OUT_DIR_S = 'BBBC006_v1_segments';
 mkdir(OUT_DIR_C);

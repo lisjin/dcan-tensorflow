@@ -13,28 +13,27 @@
 # limitations under the License.
 # ==============================================================================
 
-"""Routine for decoding the CIFAR-10 binary file format."""
+"""Routine for decoding the BBBC006 binary file format."""
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
 import os
 
-from six.moves import xrange  # pylint: disable=redefined-builtin
 import tensorflow as tf
 
-# Process images of this size. Note that this differs from the original CIFAR
+# Process images of this size. Note that this differs from the original BBBC006
 # image size of 32 x 32. If one alters this number, then the entire model
 # architecture will change and any model would need to be retrained.
 IMAGE_SIZE = 24
 
-# Global constants describing the CIFAR-10 data set.
+# Global constants describing the BBBC006 data set.
 NUM_CLASSES = 10
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 50000
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 10000
 
 
-def read_bbbc006(filename_queue):
+def read_bbbc006(filename_queue, labels_queue):
     """Reads and parses examples from BBBC006 data files.
 
     Recommendation: if you want N-way read parallelism, call this function
@@ -61,39 +60,25 @@ def read_bbbc006(filename_queue):
 
     result = BBBC006Record()
 
-    # Dimensions of the images in the CIFAR-10 dataset.
-    # See http://www.cs.toronto.edu/~kriz/cifar.html for a description of the
+    # Dimensions of the images in the BBBC006 dataset.
+    # See http://www.cs.toronto.edu/~kriz/BBBC006.html for a description of the
     # input format.
-    label_bytes = 1  # 2 for CIFAR-100
-    result.height = 32
-    result.width = 32
-    result.depth = 3
-    image_bytes = result.height * result.width * result.depth
+    result.height = 696
+    result.width = 520
+    result.depth = 1
+    record_bytes = result.height * result.width * result.depth
     # Every record consists of a label followed by the image, with a
     # fixed number of bytes for each.
-    record_bytes = label_bytes + image_bytes
 
     # Read a record, getting filenames from the filename_queue.  No
-    # header or footer in the CIFAR-10 format, so we leave header_bytes
+    # header or footer in the BBBC006 format, so we leave header_bytes
     # and footer_bytes at their default of 0.
     reader = tf.FixedLengthRecordReader(record_bytes=record_bytes)
     result.key, value = reader.read(filename_queue)
+    result.label_key, label_value = reader.read(labels_queue)
 
-    # Convert from a string to a vector of uint8 that is record_bytes long.
-    record_bytes = tf.decode_raw(value, tf.uint8)
-
-    # The first bytes represent the label, which we convert from uint8->int32.
-    result.label = tf.cast(
-        tf.strided_slice(record_bytes, [0], [label_bytes]), tf.int32)
-
-    # The remaining bytes after the label represent the image, which we reshape
-    # from [depth * height * width] to [depth, height, width].
-    depth_major = tf.reshape(
-        tf.strided_slice(record_bytes, [label_bytes],
-                         [label_bytes + image_bytes]),
-        [result.depth, result.height, result.width])
-    # Convert from [depth, height, width] to [height, width, depth].
-    result.uint8image = tf.transpose(depth_major, [1, 2, 0])
+    result.uint8image = tf.image.decode_png(value, channels=1, dtype=tf.uint8)
+    result.label = tf.image.decode_png(label_value, channels=1, dtype=tf.uint8)
 
     return result
 
@@ -103,29 +88,29 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
     """Construct a queued batch of images and labels.
 
     Args:
-      image: 3-D Tensor of [height, width, 3] of type.float32.
-      label: 1-D Tensor of type.int32
+      image: 3-D Tensor of [height, width, 1] of type.float32.
+      label 3-D Tensor of [height, width, 1] of type.float32.
       min_queue_examples: int32, minimum number of samples to retain
         in the queue that provides of batches of examples.
       batch_size: Number of images per batch.
       shuffle: boolean indicating whether to use a shuffling queue.
 
     Returns:
-      images: Images. 4D tensor of [batch_size, height, width, 3] size.
-      labels: Labels. 1D tensor of [batch_size] size.
+      images: Images. 4D tensor of [batch_size, height, width, 1] size.
+      labels: Labels. 4D tensor of [batch_size, height, width, 1] size.
     """
     # Create a queue that shuffles the examples, and then
     # read 'batch_size' images + labels from the example queue.
     num_preprocess_threads = 16
     if shuffle:
-        images, label_batch = tf.train.shuffle_batch(
+        images, labels = tf.train.shuffle_batch(
             [image, label],
             batch_size=batch_size,
             num_threads=num_preprocess_threads,
             capacity=min_queue_examples + 3 * batch_size,
             min_after_dequeue=min_queue_examples)
     else:
-        images, label_batch = tf.train.batch(
+        images, labels = tf.train.batch(
             [image, label],
             batch_size=batch_size,
             num_threads=num_preprocess_threads,
@@ -134,31 +119,33 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
     # Display the training images in the visualizer.
     tf.summary.image('images', images)
 
-    return images, tf.reshape(label_batch, [batch_size])
+    return images, labels
 
 
 def distorted_inputs(data_dir, batch_size):
-    """Construct distorted input for CIFAR training using the Reader ops.
+    """Construct distorted input for BBBC006 training using the Reader ops.
 
     Args:
-      data_dir: Path to the CIFAR-10 data directory.
+      data_dir: Path to the BBBC006 data directory.
       batch_size: Number of images per batch.
 
     Returns:
       images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
       labels: Labels. 1D tensor of [batch_size] size.
     """
-    filenames = [os.path.join(data_dir, 'data_batch_%d.bin' % i)
-                 for i in xrange(1, 6)]
+    filenames = [os.path.join(data_dir, 'BBBC006_v1_train')]
     for f in filenames:
         if not tf.gfile.Exists(f):
             raise ValueError('Failed to find file: ' + f)
 
-    # Create a queue that produces the filenames to read.
+    labels = [os.path.join(data_dir, 'BBBC006_v1_labels')]
+
+    # Create queues that produce the filenames and labels to read.
     filename_queue = tf.train.string_input_producer(filenames)
+    labels_queue = tf.train.string_input_producer(labels)
 
     # Read examples from files in the filename queue.
-    read_input = read_bbbc006(filename_queue)
+    read_input = read_bbbc006(filename_queue, labels_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
 
     height = IMAGE_SIZE
@@ -168,7 +155,7 @@ def distorted_inputs(data_dir, batch_size):
     # distortions applied to the image.
 
     # Randomly crop a [height, width] section of the image.
-    distorted_image = tf.random_crop(reshaped_image, [height, width, 3])
+    distorted_image = tf.random_crop(reshaped_image, [height, width, 1])
 
     # Randomly flip the image horizontally.
     distorted_image = tf.image.random_flip_left_right(distorted_image)
@@ -186,14 +173,14 @@ def distorted_inputs(data_dir, batch_size):
     float_image = tf.image.per_image_standardization(distorted_image)
 
     # Set the shapes of tensors.
-    float_image.set_shape([height, width, 3])
-    read_input.label.set_shape([1])
+    float_image.set_shape([height, width, 1])
+    read_input.label.set_shape([height, width, 1])
 
     # Ensure that the random shuffling has good mixing properties.
     min_fraction_of_examples_in_queue = 0.4
     min_queue_examples = int(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN *
                              min_fraction_of_examples_in_queue)
-    print('Filling queue with %d CIFAR images before starting to train. '
+    print('Filling queue with %d BBBC006 images before starting to train. '
           'This will take a few minutes.' % min_queue_examples)
 
     # Generate a batch of images and labels by building up a queue of examples.
@@ -203,11 +190,11 @@ def distorted_inputs(data_dir, batch_size):
 
 
 def inputs(eval_data, data_dir, batch_size):
-    """Construct input for CIFAR evaluation using the Reader ops.
+    """Construct input for BBBC006 evaluation using the Reader ops.
 
     Args:
       eval_data: bool, indicating if one should use the train or eval data set.
-      data_dir: Path to the CIFAR-10 data directory.
+      data_dir: Path to the BBBC006 data directory.
       batch_size: Number of images per batch.
 
     Returns:
@@ -215,22 +202,24 @@ def inputs(eval_data, data_dir, batch_size):
       labels: Labels. 1D tensor of [batch_size] size.
     """
     if not eval_data:
-        filenames = [os.path.join(data_dir, 'data_batch_%d.bin' % i)
-                     for i in xrange(1, 6)]
+        filenames = [os.path.join(data_dir, 'BBBC006_v1_train')]
         num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
     else:
-        filenames = [os.path.join(data_dir, 'test_batch.bin')]
+        filenames = [os.path.join(data_dir, 'BBBC006_v1_test')]
         num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
+
+    labels = [os.path.join(data_dir, 'BBBC006_v1_labels')]
 
     for f in filenames:
         if not tf.gfile.Exists(f):
             raise ValueError('Failed to find file: ' + f)
 
-    # Create a queue that produces the filenames to read.
+    # Create queues that produce the filenames and labels to read.
     filename_queue = tf.train.string_input_producer(filenames)
+    labels_queue = tf.train.string_input_producer(labels)
 
     # Read examples from files in the filename queue.
-    read_input = read_bbbc006(filename_queue)
+    read_input = read_bbbc006(filename_queue, labels_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
 
     height = IMAGE_SIZE
