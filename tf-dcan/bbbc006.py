@@ -29,7 +29,7 @@ import bbbc006_input
 FLAGS = tf.app.flags.FLAGS
 
 # Basic model parameters.
-tf.app.flags.DEFINE_integer('batch_size', 128,
+tf.app.flags.DEFINE_integer('batch_size', 1,
                             """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_string('data_dir', 'data',
                            """Path to the BBBC006 data directory.""")
@@ -38,7 +38,6 @@ tf.app.flags.DEFINE_boolean('use_fp16', False,
 
 # Global constants describing the BBBC006 data set.
 IMAGE_SIZE = bbbc006_input.IMAGE_SIZE
-NUM_CLASSES = bbbc006_input.NUM_CLASSES
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
@@ -47,6 +46,10 @@ MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0  # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.1  # Initial learning rate.
+
+# Constants for the model architecture.
+NUM_LAYERS = 6
+FEAT_ROOT = 32
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -177,76 +180,47 @@ def inference(images):
     # If we only ran this model on a single GPU, we could simplify this function
     # by replacing all instances of tf.get_variable() with tf.Variable().
     #
-    # conv1
-    with tf.variable_scope('conv1') as scope:
-        kernel = _variable_with_weight_decay('weights',
-                                             shape=[5, 5, 3, 64],
-                                             stddev=5e-2,
-                                             wd=0.0)
-        conv = tf.nn.conv2d(images, kernel, [1, 1, 1, 1], padding='SAME')
-        biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.0))
-        pre_activation = tf.nn.bias_add(conv, biases)
-        conv1 = tf.nn.relu(pre_activation, name=scope.name)
-        _activation_summary(conv1)
+    features = FEAT_ROOT
+    in_layer = images
 
-    # pool1
-    pool1 = tf.nn.max_pool(conv1, ksize=[1, 3, 3, 1], strides=[1, 2, 2, 1],
-                           padding='SAME', name='pool1')
-    # norm1
-    norm1 = tf.nn.lrn(pool1, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
-                      name='norm1')
+    # Contains convolution layers 4-6
+    convs = []
+    for layer in range(NUM_LAYERS):
+        # conv
+        with tf.variable_scope('conv' + str(layer + 1)) as scope:
+            # Double the number of features for all but convolution layer 5
+            features *= 2 if layer != 4 else 1
 
-    # conv2
-    with tf.variable_scope('conv2') as scope:
-        kernel = _variable_with_weight_decay('weights',
-                                             shape=[5, 5, 64, 64],
-                                             stddev=5e-2,
-                                             wd=0.0)
-        conv = tf.nn.conv2d(norm1, kernel, [1, 1, 1, 1], padding='SAME')
-        biases = _variable_on_cpu('biases', [64], tf.constant_initializer(0.1))
-        pre_activation = tf.nn.bias_add(conv, biases)
-        conv2 = tf.nn.relu(pre_activation, name=scope.name)
-        _activation_summary(conv2)
+            channels = features if layer == 4 else \
+                (features // 2 if layer > 0 else 1)
 
-    # norm2
-    norm2 = tf.nn.lrn(conv2, 4, bias=1.0, alpha=0.001 / 9.0, beta=0.75,
-                      name='norm2')
-    # pool2
-    pool2 = tf.nn.max_pool(norm2, ksize=[1, 3, 3, 1],
-                           strides=[1, 2, 2, 1], padding='SAME', name='pool2')
+            stddev = tf.sqrt(float(2 / features))
+            kernel = _variable_with_weight_decay('weights',
+                                                 shape=[3, 3, channels, features],
+                                                 stddev=stddev, wd=0.0)
 
-    # local3
-    with tf.variable_scope('local3') as scope:
-        # Move everything into depth so we can perform a single matrix multiply.
-        reshape = tf.reshape(pool2, [FLAGS.batch_size, -1])
-        dim = reshape.get_shape()[1].value
-        weights = _variable_with_weight_decay('weights', shape=[dim, 384],
-                                              stddev=0.04, wd=0.004)
-        biases = _variable_on_cpu('biases', [384], tf.constant_initializer(0.1))
-        local3 = tf.nn.relu(tf.matmul(reshape, weights) + biases, name=scope.name)
-        _activation_summary(local3)
+            print('L%d: ' % layer + str(in_layer.get_shape()))
+            print('K%d: ' % layer + str(kernel.get_shape()))
+            print()
 
-    # local4
-    with tf.variable_scope('local4') as scope:
-        weights = _variable_with_weight_decay('weights', shape=[384, 192],
-                                              stddev=0.04, wd=0.004)
-        biases = _variable_on_cpu('biases', [192], tf.constant_initializer(0.1))
-        local4 = tf.nn.relu(tf.matmul(local3, weights) + biases, name=scope.name)
-        _activation_summary(local4)
+            conv_pre = tf.nn.conv2d(in_layer, kernel, [1, 1, 1, 1],
+                                    padding='SAME')
+            biases = _variable_on_cpu('biases', [features],
+                                      tf.constant_initializer(0.0))
+            pre_activation = tf.nn.bias_add(conv_pre, biases)
+            conv = tf.nn.relu(pre_activation, name=scope.name)
+            _activation_summary(conv)
 
-    # linear layer(WX + b),
-    # We don't apply softmax here because
-    # tf.nn.sparse_softmax_cross_entropy_with_logits accepts the unscaled logits
-    # and performs the softmax internally for efficiency.
-    with tf.variable_scope('softmax_linear') as scope:
-        weights = _variable_with_weight_decay('weights', [192, NUM_CLASSES],
-                                              stddev=1 / 192.0, wd=0.0)
-        biases = _variable_on_cpu('biases', [NUM_CLASSES],
-                                  tf.constant_initializer(0.0))
-        softmax_linear = tf.add(tf.matmul(local4, weights), biases, name=scope.name)
-        _activation_summary(softmax_linear)
+            # Save last three convolution layers for later use
+            if layer > 3:
+                convs.append(conv)
 
-    return softmax_linear
+        # pool
+        if layer < 5:  # Convolution layer 6 has no max pooling afterwards
+            pool = tf.nn.max_pool(conv, ksize=[1, 2, 2, 1],
+                                  strides=[1, 2, 2, 1], padding='SAME',
+                                  name='pool' + str(layer + 1))
+            in_layer = pool
 
 
 def loss(logits, labels):

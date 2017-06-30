@@ -28,9 +28,8 @@ import tensorflow as tf
 IMAGE_SIZE = 24
 
 # Global constants describing the BBBC006 data set.
-NUM_CLASSES = 10
-NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 50000
-NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 10000
+NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 692
+NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 76
 
 
 def read_bbbc006(filename_queue, labels_queue):
@@ -148,17 +147,11 @@ def distorted_inputs(data_dir, batch_size):
     read_input = read_bbbc006(filename_queue, labels_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
 
-    height = IMAGE_SIZE
-    width = IMAGE_SIZE
-
     # Image processing for training the network. Note the many random
     # distortions applied to the image.
 
-    # Randomly crop a [height, width] section of the image.
-    distorted_image = tf.random_crop(reshaped_image, [height, width, 1])
-
     # Randomly flip the image horizontally.
-    distorted_image = tf.image.random_flip_left_right(distorted_image)
+    distorted_image = tf.image.random_flip_left_right(reshaped_image)
 
     # Because these operations are not commutative, consider randomizing
     # the order their operation.
@@ -173,8 +166,8 @@ def distorted_inputs(data_dir, batch_size):
     float_image = tf.image.per_image_standardization(distorted_image)
 
     # Set the shapes of tensors.
-    float_image.set_shape([height, width, 1])
-    read_input.label.set_shape([height, width, 1])
+    float_image.set_shape([read_input.height, read_input.width, 1])
+    read_input.label.set_shape([read_input.height, read_input.width, 1])
 
     # Ensure that the random shuffling has good mixing properties.
     min_fraction_of_examples_in_queue = 0.4
@@ -222,19 +215,13 @@ def inputs(eval_data, data_dir, batch_size):
     read_input = read_bbbc006(filename_queue, labels_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
 
-    height = IMAGE_SIZE
-    width = IMAGE_SIZE
-
     # Image processing for evaluation.
-    # Crop the central [height, width] of the image.
-    resized_image = tf.image.resize_image_with_crop_or_pad(reshaped_image,
-                                                           height, width)
 
     # Subtract off the mean and divide by the variance of the pixels.
-    float_image = tf.image.per_image_standardization(resized_image)
+    float_image = tf.image.per_image_standardization(reshaped_image)
 
     # Set the shapes of tensors.
-    float_image.set_shape([height, width, 3])
+    float_image.set_shape([read_input.height, read_input.width, 3])
     read_input.label.set_shape([1])
 
     # Ensure that the random shuffling has good mixing properties.
