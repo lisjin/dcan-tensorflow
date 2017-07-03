@@ -32,7 +32,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 692
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 76
 
 
-def read_bbbc006(filename_queue, labels_queue):
+def read_bbbc006(filename_queue, contours_queue, segments_queue):
     """Reads and parses examples from BBBC006 data files.
 
     Recommendation: if you want N-way read parallelism, call this function
@@ -74,11 +74,15 @@ def read_bbbc006(filename_queue, labels_queue):
     # and footer_bytes at their default of 0.
     reader = tf.FixedLengthRecordReader(record_bytes=record_bytes)
     result.key, value = reader.read(filename_queue)
-    result.label_key, label_value = reader.read(labels_queue)
+    result.contour_key, contour_value = reader.read(contours_queue)
+    result.segment_key, segment_value = reader.read(segments_queue)
 
     result.uint8image = tf.image.decode_png(value, channels=1, dtype=tf.uint8)
-    result.label = tf.image.decode_png(label_value, channels=1, dtype=tf.uint8)
-
+    contour = tf.image.decode_png(contour_value, channels=1,
+                                         dtype=tf.uint8)
+    segment = tf.image.decode_png(segment_value, channels=1,
+                                         dtype=tf.uint8)
+    result.label = tf.concat([contour, segment], 2)
     return result
 
 
@@ -138,13 +142,16 @@ def distorted_inputs(data_dir, batch_size):
             raise ValueError('Failed to find file: ' + f)
 
     labels = [os.path.join(data_dir, 'BBBC006_v1_labels')]
+    contours = [os.path.join(data_dir, 'BBBC006_v1_contours')]
+    segments = [os.path.join(data_dir, 'BBBC006_v1_segments')]
 
     # Create queues that produce the filenames and labels to read.
     filename_queue = tf.train.string_input_producer(filenames)
-    labels_queue = tf.train.string_input_producer(labels)
+    contours_queue = tf.train.string_input_producer(contours)
+    segments_queue = tf.train.string_input_producer(segments)
 
     # Read examples from files in the filename queue.
-    read_input = read_bbbc006(filename_queue, labels_queue)
+    read_input = read_bbbc006(filename_queue, contours_queue, segments_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
 
     # Image processing for training the network. Note the many random
@@ -167,7 +174,7 @@ def distorted_inputs(data_dir, batch_size):
 
     # Set the shapes of tensors.
     float_image.set_shape([read_input.height, read_input.width, 1])
-    read_input.label.set_shape([read_input.height, read_input.width, 1])
+    read_input.label.set_shape([read_input.height, read_input.width, 2])
 
     # Ensure that the random shuffling has good mixing properties.
     min_fraction_of_examples_in_queue = 0.4
@@ -201,7 +208,8 @@ def inputs(eval_data, data_dir, batch_size):
         filenames = [os.path.join(data_dir, 'BBBC006_v1_test')]
         num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
-    labels = [os.path.join(data_dir, 'BBBC006_v1_labels')]
+    contours = [os.path.join(data_dir, 'BBBC006_v1_contours')]
+    segments = [os.path.join(data_dir, 'BBBC006_v1_segments')]
 
     for f in filenames:
         if not tf.gfile.Exists(f):
@@ -209,10 +217,11 @@ def inputs(eval_data, data_dir, batch_size):
 
     # Create queues that produce the filenames and labels to read.
     filename_queue = tf.train.string_input_producer(filenames)
-    labels_queue = tf.train.string_input_producer(labels)
+    contours_queue = tf.train.string_input_producer(contours)
+    segments_queue = tf.train.string_input_producer(segments)
 
     # Read examples from files in the filename queue.
-    read_input = read_bbbc006(filename_queue, labels_queue)
+    read_input = read_bbbc006(filename_queue, contours_queue, segments_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
 
     # Image processing for evaluation.
@@ -221,8 +230,8 @@ def inputs(eval_data, data_dir, batch_size):
     float_image = tf.image.per_image_standardization(reshaped_image)
 
     # Set the shapes of tensors.
-    float_image.set_shape([read_input.height, read_input.width, 3])
-    read_input.label.set_shape([1])
+    float_image.set_shape([read_input.height, read_input.width, 1])
+    read_input.label.set_shape([read_input.height, read_input.width, 2])
 
     # Ensure that the random shuffling has good mixing properties.
     min_fraction_of_examples_in_queue = 0.4

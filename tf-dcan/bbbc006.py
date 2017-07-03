@@ -31,8 +31,6 @@ FLAGS = tf.app.flags.FLAGS
 # Basic model parameters.
 tf.app.flags.DEFINE_integer('batch_size', 1,
                             """Number of images to process in a batch.""")
-tf.app.flags.DEFINE_integer('num_classes', 2,
-                            """Number of output classes""")
 tf.app.flags.DEFINE_string('data_dir', 'data',
                            """Path to the BBBC006 data directory.""")
 tf.app.flags.DEFINE_boolean('use_fp16', False,
@@ -175,7 +173,7 @@ def inference(images):
       images: Images returned from distorted_inputs() or inputs().
 
     Returns:
-      Logits.
+      output_maps: List of output_map 4D tensors of [batch_size, 696, 520, 1]
     """
     # We instantiate all variables using tf.get_variable() instead of
     # tf.Variable() in order to share variables across multiple GPU training runs.
@@ -185,21 +183,21 @@ def inference(images):
     features = FEAT_ROOT
     in_layer = images
 
-    # Base constant for deconvolution (doubles after each layer for layers 4-6)
-    #   kernel size: 2 * deconv_const
-    #   stride: deconv_const
-    deconv_const = 2
+    # Kernel size: 2 * deconv_const
+    # Stride: deconv_const
+    deconv_const = 8
 
     deconv_shape = in_layer.get_shape().as_list()
 
-    # Contains convolution and deconvolution layers 4-6, respectively
-    deconvs = []
+    # Output maps for up-sampled layers 4-6, respectively
+    output_maps = []
     for layer in range(NUM_LAYERS):
         # conv
         with tf.variable_scope('conv' + str(layer + 1)) as scope:
             # Double the number of features for all but convolution layer 5
             features *= 2 if layer != 4 else 1
 
+            # Number of input dimensions from last layer
             channels = features if layer == 4 else \
                 (features // 2 if layer > 0 else 1)
 
@@ -247,18 +245,31 @@ def inference(images):
                                                          deconv_const, 1],
                                                 padding='SAME')
                 deconv = tf.nn.bias_add(deconv, biases, name=scope.name)
-                deconvs.append(deconv)
                 deconv_const *= 2
 
+            with tf.variable_scope('output_map' + str(layer + 1)) as scope:
+                # Output map result 1 X 1 convolution
+                channels = deconv.get_shape().as_list()[3]
+                kernel = _variable_with_weight_decay('weights',
+                                                     shape=[1, 1, channels, 2],
+                                                     stddev=0.01, wd=0.0)
+                biases = _variable_on_cpu('biases', [2],
+                                          tf.constant_initializer(0.0))
+                conv_pre = tf.nn.conv2d(deconv, kernel, [1, 1, 1, 1],
+                                        padding='SAME')
+                output_map = tf.nn.relu(tf.nn.bias_add(conv_pre, biases),
+                                        name=scope.name)
+                output_maps.append(output_map)
+    return output_maps
 
-def loss(logits, labels):
+
+def loss(output_maps, labels):
     """Add L2Loss to all the trainable variables.
 
     Add summary for "Loss" and "Loss/avg".
     Args:
-      logits: Logits from inference().
-      labels: Labels from distorted_inputs or inputs(). 4-D tensor
-              of shape [batch_size]
+      output_maps: Output maps from inference().
+      labels: Labels from distorted_inputs or inputs()
 
     Returns:
       Loss tensor of type float.
