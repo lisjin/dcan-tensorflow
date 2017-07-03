@@ -31,6 +31,8 @@ FLAGS = tf.app.flags.FLAGS
 # Basic model parameters.
 tf.app.flags.DEFINE_integer('batch_size', 1,
                             """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('num_classes', 2,
+                            """Number of output classes""")
 tf.app.flags.DEFINE_string('data_dir', 'data',
                            """Path to the BBBC006 data directory.""")
 tf.app.flags.DEFINE_boolean('use_fp16', False,
@@ -183,8 +185,15 @@ def inference(images):
     features = FEAT_ROOT
     in_layer = images
 
-    # Contains convolution layers 4-6
-    convs = []
+    # Base constant for deconvolution (doubles after each layer for layers 4-6)
+    #   kernel size: 2 * deconv_const
+    #   stride: deconv_const
+    deconv_const = 2
+
+    deconv_shape = in_layer.get_shape().as_list()
+
+    # Contains convolution and deconvolution layers 4-6, respectively
+    deconvs = []
     for layer in range(NUM_LAYERS):
         # conv
         with tf.variable_scope('conv' + str(layer + 1)) as scope:
@@ -198,29 +207,48 @@ def inference(images):
             kernel = _variable_with_weight_decay('weights',
                                                  shape=[3, 3, channels, features],
                                                  stddev=stddev, wd=0.0)
-
-            print('L%d: ' % layer + str(in_layer.get_shape()))
-            print('K%d: ' % layer + str(kernel.get_shape()))
-            print()
-
             conv_pre = tf.nn.conv2d(in_layer, kernel, [1, 1, 1, 1],
                                     padding='SAME')
             biases = _variable_on_cpu('biases', [features],
                                       tf.constant_initializer(0.0))
             pre_activation = tf.nn.bias_add(conv_pre, biases)
-            conv = tf.nn.relu(pre_activation, name=scope.name)
-            _activation_summary(conv)
+            conv_post = tf.nn.relu(pre_activation, name=scope.name)
 
-            # Save last three convolution layers for later use
-            if layer > 3:
-                convs.append(conv)
+            # Add dropout with dropout rate of 0.5 to layers 5 and 6
+            dropout = conv_post if layer < 4 else tf.nn.dropout(conv_post,
+                                                                keep_prob=0.5)
+            _activation_summary(dropout)
 
         # pool
         if layer < 5:  # Convolution layer 6 has no max pooling afterwards
-            pool = tf.nn.max_pool(conv, ksize=[1, 2, 2, 1],
+            pool = tf.nn.max_pool(dropout, ksize=[1, 2, 2, 1],
                                   strides=[1, 2, 2, 1], padding='SAME',
                                   name='pool' + str(layer + 1))
             in_layer = pool
+        else:
+            in_layer = dropout
+
+        if layer > 2:
+            # deconv
+            with tf.variable_scope('deconv' + str(layer + 1)) as scope:
+                deconv_in = in_layer
+                channels = deconv_in.get_shape().as_list()[3]
+                kernel = _variable_with_weight_decay('weights',
+                                                     shape=[deconv_const * 2,
+                                                            deconv_const * 2,
+                                                            channels, channels],
+                                                     stddev=0.01, wd=0.0)
+                biases = _variable_on_cpu('biases', [features],
+                                          tf.constant_initializer(0.0))
+                deconv_shape[3] = channels
+                deconv = tf.nn.conv2d_transpose(deconv_in, kernel,
+                                                deconv_shape,
+                                                strides=[1, deconv_const,
+                                                         deconv_const, 1],
+                                                padding='SAME')
+                deconv = tf.nn.bias_add(deconv, biases, name=scope.name)
+                deconvs.append(deconv)
+                deconv_const *= 2
 
 
 def loss(logits, labels):
@@ -229,7 +257,7 @@ def loss(logits, labels):
     Add summary for "Loss" and "Loss/avg".
     Args:
       logits: Logits from inference().
-      labels: Labels from distorted_inputs or inputs(). 1-D tensor
+      labels: Labels from distorted_inputs or inputs(). 4-D tensor
               of shape [batch_size]
 
     Returns:
