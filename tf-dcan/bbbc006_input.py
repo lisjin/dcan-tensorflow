@@ -22,10 +22,9 @@ import os
 
 import tensorflow as tf
 
-# Process images of this size. Note that this differs from the original BBBC006
-# image size of 32 x 32. If one alters this number, then the entire model
-# architecture will change and any model would need to be retrained.
-IMAGE_SIZE = 24
+# Process images of this size.
+IMAGE_WIDTH = 696
+IMAGE_HEIGHT = 520
 
 # Global constants describing the BBBC006 data set.
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 692
@@ -78,10 +77,8 @@ def read_bbbc006(filename_queue, contours_queue, segments_queue):
     result.segment_key, segment_value = reader.read(segments_queue)
 
     result.uint8image = tf.image.decode_png(value, channels=1, dtype=tf.uint8)
-    contour = tf.image.decode_png(contour_value, channels=1,
-                                         dtype=tf.uint8)
-    segment = tf.image.decode_png(segment_value, channels=1,
-                                         dtype=tf.uint8)
+    contour = tf.image.decode_png(contour_value, channels=1, dtype=tf.uint8)
+    segment = tf.image.decode_png(segment_value, channels=1, dtype=tf.uint8)
     result.label = tf.concat([contour, segment], 2)
     return result
 
@@ -141,7 +138,6 @@ def distorted_inputs(data_dir, batch_size):
         if not tf.gfile.Exists(f):
             raise ValueError('Failed to find file: ' + f)
 
-    labels = [os.path.join(data_dir, 'BBBC006_v1_labels')]
     contours = [os.path.join(data_dir, 'BBBC006_v1_contours')]
     segments = [os.path.join(data_dir, 'BBBC006_v1_segments')]
 
@@ -153,6 +149,7 @@ def distorted_inputs(data_dir, batch_size):
     # Read examples from files in the filename queue.
     read_input = read_bbbc006(filename_queue, contours_queue, segments_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
+    read_input.label = tf.cast(read_input.label, tf.int32)
 
     # Image processing for training the network. Note the many random
     # distortions applied to the image.

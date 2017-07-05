@@ -37,7 +37,8 @@ tf.app.flags.DEFINE_boolean('use_fp16', False,
                             """Train the model using fp16.""")
 
 # Global constants describing the BBBC006 data set.
-IMAGE_SIZE = bbbc006_input.IMAGE_SIZE
+IMAGE_WIDTH = bbbc006_input.IMAGE_WIDTH
+IMAGE_HEIGHT = bbbc006_input.IMAGE_HEIGHT
 NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
@@ -124,7 +125,7 @@ def distorted_inputs():
     """Construct distorted input for CIFAR training using the Reader ops.
 
     Returns:
-      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+      images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
       labels: Labels. 1D tensor of [batch_size] size.
 
     Raises:
@@ -148,7 +149,7 @@ def inputs(eval_data):
       eval_data: bool, indicating if one should use the train or eval data set.
 
     Returns:
-      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+      images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
       labels: Labels. 1D tensor of [batch_size] size.
 
     Raises:
@@ -189,8 +190,9 @@ def inference(images):
 
     deconv_shape = in_layer.get_shape().as_list()
 
-    # Output maps for up-sampled layers 4-6, respectively
-    output_maps = []
+    # Up-sampled layers 4-6 output maps for contours and segments, respectively
+    c_output_maps = []
+    s_output_maps = []
     for layer in range(NUM_LAYERS):
         # conv
         with tf.variable_scope('conv' + str(layer + 1)) as scope:
@@ -227,43 +229,56 @@ def inference(images):
             in_layer = dropout
 
         if layer > 2:
-            # deconv
-            with tf.variable_scope('deconv' + str(layer + 1)) as scope:
-                deconv_in = in_layer
-                channels = deconv_in.get_shape().as_list()[3]
-                kernel = _variable_with_weight_decay('weights',
-                                                     shape=[deconv_const * 2,
-                                                            deconv_const * 2,
-                                                            channels, channels],
-                                                     stddev=0.01, wd=0.0)
-                biases = _variable_on_cpu('biases', [features],
-                                          tf.constant_initializer(0.0))
-                deconv_shape[3] = channels
-                deconv = tf.nn.conv2d_transpose(deconv_in, kernel,
-                                                deconv_shape,
-                                                strides=[1, deconv_const,
-                                                         deconv_const, 1],
-                                                padding='SAME')
-                deconv = tf.nn.bias_add(deconv, biases, name=scope.name)
-                deconv_const *= 2
+            # Deconvolution and output mapping for segments and contours
+            for i in range(2):
+                # deconv
+                with tf.variable_scope('deconv' + str(layer + 1)) as scope:
+                    deconv_in = in_layer
+                    channels = deconv_in.get_shape().as_list()[3]
+                    kernel = _variable_with_weight_decay('weights' + str(i),
+                                                         shape=[deconv_const * 2,
+                                                                deconv_const * 2,
+                                                                channels, channels],
+                                                         stddev=0.01, wd=0.0)
+                    biases = _variable_on_cpu('biases' + str(i), [features],
+                                              tf.constant_initializer(0.0))
+                    deconv_shape[3] = channels
+                    deconv = tf.nn.conv2d_transpose(deconv_in, kernel,
+                                                    deconv_shape,
+                                                    strides=[1, deconv_const,
+                                                             deconv_const, 1],
+                                                    padding='SAME')
+                    deconv = tf.nn.bias_add(deconv, biases, name=scope.name +
+                                                                 '_' + str(i))
+                    deconv_const *= 2
 
-            with tf.variable_scope('output_map' + str(layer + 1)) as scope:
-                # Output map result 1 X 1 convolution
-                channels = deconv.get_shape().as_list()[3]
-                kernel = _variable_with_weight_decay('weights',
-                                                     shape=[1, 1, channels, 2],
-                                                     stddev=0.01, wd=0.0)
-                biases = _variable_on_cpu('biases', [2],
-                                          tf.constant_initializer(0.0))
-                conv_pre = tf.nn.conv2d(deconv, kernel, [1, 1, 1, 1],
-                                        padding='SAME')
-                output_map = tf.nn.relu(tf.nn.bias_add(conv_pre, biases),
-                                        name=scope.name)
-                output_maps.append(output_map)
-    return output_maps
+                # output maps
+                with tf.variable_scope('output_map' + str(layer + 1)) as scope:
+                    # Output map result 1 X 1 convolution
+                    channels = deconv.get_shape().as_list()[3]
+                    kernel = _variable_with_weight_decay('weights' + str(i),
+                                                         shape=[1, 1, channels, 1],
+                                                         stddev=0.01, wd=0.0)
+                    biases = _variable_on_cpu('biases' + str(i), [1],
+                                              tf.constant_initializer(0.0))
+                    conv_pre = tf.nn.conv2d(deconv, kernel, [1, 1, 1, 1],
+                                            padding='SAME')
+                    output_map = tf.nn.relu(tf.nn.bias_add(conv_pre, biases),
+                                            name=scope.name + '_' + str(i))
+                    if i == 0:
+                        c_output_maps.append(output_map)
+                    else:
+                        s_output_maps.append(output_map)
+
+    # Get fusion layers for contours and segments, append to output maps list
+    c_fuse = tf.add(tf.add(c_output_maps[0], c_output_maps[1]), c_output_maps[2])
+    s_fuse = tf.add(tf.add(s_output_maps[0], s_output_maps[1]), s_output_maps[2])
+    c_output_maps.append(c_fuse)
+    s_output_maps.append(s_fuse)
+    return c_output_maps, s_output_maps
 
 
-def loss(output_maps, labels):
+def loss(c_output_maps, s_output_maps, labels):
     """Add L2Loss to all the trainable variables.
 
     Add summary for "Loss" and "Loss/avg".
@@ -275,15 +290,50 @@ def loss(output_maps, labels):
       Loss tensor of type float.
     """
     # Calculate the average cross entropy loss across the batch.
-    labels = tf.cast(labels, tf.int64)
-    cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-        labels=labels, logits=logits, name='cross_entropy_per_example')
-    cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-    tf.add_to_collection('losses', cross_entropy_mean)
+
+    loss_names = []
+
+    # Split the labels tensor into contours and segments image tensors
+    # Each has shape [1, 696, 520, 1]
+    contours_labels, segments_labels = tf.split(labels, 2, 3)
+    c_flat_labels = tf.reshape(contours_labels, [-1])
+    s_flat_labels = tf.reshape(segments_labels, [-1])
+
+    # Compute auxiliary loss from up-sampled layers
+    for i in range(3):
+        c_flat_logits = tf.reshape(c_output_maps[i], [-1, 1])
+        s_flat_logits = tf.reshape(s_output_maps[i], [-1, 1])
+
+        for j in range(2):
+            prefix = 'c' + str(i) if j == 0 else 's' + str(i)
+            cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=c_flat_labels if j == 0 else s_flat_labels,
+                logits=c_flat_logits if j == 0 else s_flat_logits,
+                name=prefix + '_cross_entropy_per_example')
+            cross_entropy_mean = tf.reduce_mean(cross_entropy,
+                                                  name=prefix + '_cross_entropy')
+            tf.add_to_collection(prefix + '_losses', cross_entropy_mean)
+            loss_names.append(prefix + '_losses')
+
+    # Compute main loss from fusion layers
+    main_c_flat_logits = tf.reshape(c_output_maps[3], [-1, 1])
+    main_s_flat_logits = tf.reshape(s_output_maps[3], [-1, 1])
+
+    for k in range(2):
+        prefix = 'main_c' if k == 0 else 'main_s'
+        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+            labels=c_flat_labels if k == 0 else s_flat_labels,
+            logits=main_c_flat_logits if k == 0 else main_s_flat_logits,
+            name=prefix + '_cross_entropy_per_example')
+        cross_entropy_mean = tf.reduce_mean(cross_entropy, name=prefix +
+                                                                '_cross_entropy')
+        tf.add_to_collection(prefix + '_losses', cross_entropy_mean)
+        loss_names.append(prefix + '_losses')
 
     # The total loss is defined as the cross entropy loss plus all of the weight
     # decay terms (L2 loss).
-    return tf.add_n(tf.get_collection('losses'), name='total_loss')
+    return tf.add_n([tf.get_collection(loss_name) for loss_name in loss_names],
+                    name='total_loss')
 
 
 def _add_loss_summaries(total_loss):

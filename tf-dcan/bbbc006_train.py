@@ -51,10 +51,10 @@ def train():
 
         # Build a Graph that computes the logits predictions from the
         # inference model.
-        logits = bbbc006.inference(images)
+        c_output_maps, s_output_maps = bbbc006.inference(images)
 
         # Calculate loss.
-        loss = bbbc006.loss(logits, labels)
+        loss = bbbc006.loss(c_output_maps, s_output_maps, labels)
 
         # Build a Graph that trains the model with one batch of examples and
         # updates the model parameters.
