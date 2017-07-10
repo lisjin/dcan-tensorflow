@@ -21,5 +21,6 @@ for i = 1:numel(imgNames)
             bwImg(indices(k, 1), indices(k, 2)) = 1;
         end
     end
+    bwImg = imfilter(bwImg, fspecial('disk', 3));
     imwrite(bwImg, [OUT_DIR_C '/' imgNames{i}]);
 end
