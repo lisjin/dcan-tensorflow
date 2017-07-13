@@ -21,7 +21,6 @@ from __future__ import print_function
 
 import os
 import re
-import pdb
 
 import tensorflow as tf
 
@@ -211,10 +210,6 @@ def inference(images):
     c_output_maps = []
     s_output_maps = []
 
-    # Store all weights and biases for gradients later on
-    weights = []
-    biases = []
-
     for layer in range(NUM_LAYERS):
         # CONVOLUTION
         with tf.variable_scope('conv' + str(layer + 1)) as scope:
@@ -236,7 +231,7 @@ def inference(images):
             _activation_summary(conv)
 
         # POOL
-        if layer < 5:  # Convolution layer 6 has no max pooling afterwards
+        if 0 < layer:  # Convolution layer 0 has no max pooling afterwards
             pool = tf.nn.max_pool(conv,
                                   ksize=[1, 2, 2, 1],
                                   strides=[1, 2, 2, 1],
@@ -247,44 +242,50 @@ def inference(images):
             in_layer = conv
 
         if layer > 2:
-            # Deconvolution and output mapping for segments and contours
+            # Transposed convolution and output mapping for segments and contours
             for i in range(2):
-                # DECONVOLUTION
+                # TRANSPOSED CONVOLUTION
                 with tf.variable_scope('deconv' + str(layer + 1)) as scope:
                     deconv_in = in_layer
                     channels = deconv_in.get_shape().as_list()[3]
                     shape = [deconv_c * 2, deconv_c * 2, channels, channels]
-                    weights.append(_var_with_weight_decay('weights' + str(i),
-                                                          shape=shape,
-                                                          stddev=0.01,
-                                                          wd=0.0))
-                    biases.append(_var_on_cpu('biases' + str(i), [features],
-                                              tf.constant_initializer(0.0)))
+                    weights_tmp = _var_with_weight_decay('weights' + str(i),
+                                                         shape=shape,
+                                                         stddev=0.01,
+                                                         wd=0.0)
+                    biases_tmp = _var_on_cpu('biases' + str(i),
+                                             [features],
+                                             tf.constant_initializer(0.0))
                     deconv_shape[3] = channels
 
                     # Deconvolution
-                    deconv = deconv_layer(deconv_in,weights[-1], deconv_shape, deconv_c,
-                                          biases[-1], scope.name + '_' + str(i))
-                    deconv_c *= 2
+                    deconv = deconv_layer(value=deconv_in,
+                                          filter=weights_tmp,
+                                          output_shape=deconv_shape,
+                                          deconv_c=deconv_c,
+                                          bias=biases_tmp,
+                                          scope_name=scope.name + '_' + str(i))
 
                 # OUTPUT MAPS (result 1 X 1 convolution)
                 with tf.variable_scope('output_map' + str(layer + 1)) as scope:
                     channels = deconv.get_shape().as_list()[3]
-                    weights.append(_var_with_weight_decay('weights' + str(i),
-                                                        shape=[1, 1, channels, 1],
-                                                        stddev=0.01,
-                                                        wd=0.0))
-                    biases.append(_var_on_cpu('biases' + str(i),
+                    shape = [1, 1, channels, 1]
+                    weights_tmp = _var_with_weight_decay('weights' + str(i),
+                                                         shape=shape,
+                                                         stddev=0.01,
+                                                         wd=0.0)
+                    biases_tmp = _var_on_cpu('biases' + str(i),
                                              [1],
-                                             tf.constant_initializer(0.0)))
+                                             tf.constant_initializer(0.0))
 
-                    conv = tf.nn.conv2d(deconv, weights[-1], [1, 1, 1, 1], padding='SAME')
-                    output_map = tf.nn.relu(tf.nn.bias_add(conv, biases[-1]),
+                    conv = tf.nn.conv2d(deconv, weights_tmp, [1, 1, 1, 1], padding='SAME')
+                    output_map = tf.nn.relu(tf.nn.bias_add(conv, biases_tmp),
                                             name=scope.name + '_' + str(i))
                     if i == 0:
                         c_output_maps.append(output_map)
                     else:
                         s_output_maps.append(output_map)
+            deconv_c *= 2
 
     # Get fusion layers for contours and segments, append to output maps list
     c_fuse = tf.add_n(c_output_maps)
