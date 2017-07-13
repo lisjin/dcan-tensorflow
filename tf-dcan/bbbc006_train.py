@@ -20,6 +20,7 @@ from __future__ import print_function
 
 from datetime import datetime
 import time
+import pdb
 
 import tensorflow as tf
 
@@ -39,11 +40,11 @@ tf.app.flags.DEFINE_integer('log_frequency', 10,
 
 
 def train():
-    """Train CIFAR-10 for a number of steps."""
+    """Train BBBC006 for a number of steps."""
     with tf.Graph().as_default():
         global_step = tf.contrib.framework.get_or_create_global_step()
 
-        # Get images and labels for CIFAR-10.
+        # Get images and labels for BBBC006.
         # Force input pipeline to CPU:0 to avoid operations sometimes ending up
         # on GPU and resulting in a slow down.
         with tf.device('/cpu:0'):
@@ -51,10 +52,10 @@ def train():
 
         # Build a Graph that computes the logits predictions from the
         # inference model.
-        c_output_maps, s_output_maps = bbbc006.inference(images)
+        c_fuse, s_fuse = bbbc006.inference(images)
 
         # Calculate loss.
-        loss = bbbc006.loss(c_output_maps, s_output_maps, labels)
+        loss = bbbc006.loss(c_fuse, s_fuse, labels)
 
         # Build a Graph that trains the model with one batch of examples and
         # updates the model parameters.
