@@ -19,9 +19,7 @@ from __future__ import division
 from __future__ import print_function
 
 from datetime import datetime
-import numpy as np
 import time
-import pdb
 
 import tensorflow as tf
 
@@ -49,7 +47,7 @@ def train():
         # Get images and labels for BBBC006.
         # Force input pipeline to CPU:0 to avoid operations sometimes ending up
         # on GPU and resulting in a slow down.
-        images, labels = bbbc006.distorted_inputs()
+        images, labels = bbbc006.inputs(eval_data=False)
 
         # Build a Graph that computes the logits predictions from the
         # inference model.
@@ -96,6 +94,7 @@ def train():
                 config=tf.ConfigProto(
                     log_device_placement=FLAGS.log_device_placement)) as mon_sess:
             while not mon_sess.should_stop():
+                print(mon_sess.run(global_step))
                 mon_sess.run(train_op)
 
 

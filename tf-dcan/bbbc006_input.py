@@ -19,7 +19,6 @@ from __future__ import division
 from __future__ import print_function
 
 import os
-
 import tensorflow as tf
 
 # Process images of this size.
@@ -68,10 +67,8 @@ def read_bbbc006(filename_queue, contours_queue, segments_queue):
     # Every record consists of a label followed by the image, with a
     # fixed number of bytes for each.
 
-    # Read a record, getting filenames from the filename_queue.  No
-    # header or footer in the BBBC006 format, so we leave header_bytes
-    # and footer_bytes at their default of 0.
-    reader = tf.FixedLengthRecordReader(record_bytes=record_bytes)
+    # Read a record, getting filenames from the filename_queue.
+    reader = tf.WholeFileReader()
     result.key, value = reader.read(filename_queue)
     result.contour_key, contour_value = reader.read(contours_queue)
     result.segment_key, segment_value = reader.read(segments_queue)
@@ -79,6 +76,7 @@ def read_bbbc006(filename_queue, contours_queue, segments_queue):
     result.uint8image = tf.image.decode_png(value, channels=1, dtype=tf.uint8)
     contour = tf.image.decode_png(contour_value, channels=1, dtype=tf.uint8)
     segment = tf.image.decode_png(segment_value, channels=1, dtype=tf.uint8)
+    print(result.uint8image)
     result.label = tf.concat([contour, segment], 2)
     return result
 
@@ -186,6 +184,10 @@ def distorted_inputs(data_dir, batch_size):
                                            shuffle=True)
 
 
+def get_png_files(dirname):
+    return [dirname + '/' + f for f in os.listdir(dirname) if f.endswith('.png')]
+
+
 def inputs(eval_data, data_dir, batch_size):
     """Construct input for BBBC006 evaluation using the Reader ops.
 
@@ -199,16 +201,16 @@ def inputs(eval_data, data_dir, batch_size):
       labels: Labels. 1D tensor of [batch_size] size.
     """
     if not eval_data:
-        filenames = [os.path.join(data_dir, 'BBBC006_v1_train')]
+        filenames = get_png_files(os.path.join(data_dir, 'BBBC006_v1_train'))
         num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
     else:
-        filenames = [os.path.join(data_dir, 'BBBC006_v1_test')]
+        filenames = get_png_files(os.path.join(data_dir, 'BBBC006_v1_test'))
         num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
-    contours = [os.path.join(data_dir, 'BBBC006_v1_contours')]
-    segments = [os.path.join(data_dir, 'BBBC006_v1_segments')]
+    contours = get_png_files(os.path.join(data_dir, 'BBBC006_v1_contours'))
+    segments = get_png_files(os.path.join(data_dir, 'BBBC006_v1_segments'))
 
-    for f in filenames:
+    for f in filenames + contours + segments:
         if not tf.gfile.Exists(f):
             raise ValueError('Failed to find file: ' + f)
 
@@ -220,6 +222,7 @@ def inputs(eval_data, data_dir, batch_size):
     # Read examples from files in the filename queue.
     read_input = read_bbbc006(filename_queue, contours_queue, segments_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
+    read_input.label = tf.cast(read_input.label, tf.int32)
 
     # Image processing for evaluation.
 
