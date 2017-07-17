@@ -63,7 +63,6 @@ def read_bbbc006(filename_queue, contours_queue, segments_queue):
     result.height = 696
     result.width = 520
     result.depth = 1
-    record_bytes = result.height * result.width * result.depth
     # Every record consists of a label followed by the image, with a
     # fixed number of bytes for each.
 
@@ -73,10 +72,10 @@ def read_bbbc006(filename_queue, contours_queue, segments_queue):
     result.contour_key, contour_value = reader.read(contours_queue)
     result.segment_key, segment_value = reader.read(segments_queue)
 
-    result.uint8image = tf.image.decode_png(value, channels=1, dtype=tf.uint8)
+    result.uint8image = tf.image.decode_png(value, channels=1, dtype=tf.uint16)
     contour = tf.image.decode_png(contour_value, channels=1, dtype=tf.uint8)
     segment = tf.image.decode_png(segment_value, channels=1, dtype=tf.uint8)
-    print(result.uint8image)
+
     result.label = tf.concat([contour, segment], 2)
     return result
 
