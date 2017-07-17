@@ -19,7 +19,9 @@ from __future__ import division
 from __future__ import print_function
 
 from datetime import datetime
+import numpy as np
 import time
+import pdb
 
 import tensorflow as tf
 
@@ -36,6 +38,7 @@ tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
 tf.app.flags.DEFINE_integer('log_frequency', 10,
                             """How often to log results to the console.""")
+tf.logging.set_verbosity(tf.logging.DEBUG)
 
 
 def train():
@@ -46,8 +49,7 @@ def train():
         # Get images and labels for BBBC006.
         # Force input pipeline to CPU:0 to avoid operations sometimes ending up
         # on GPU and resulting in a slow down.
-        with tf.device('/cpu:0'):
-            images, labels = bbbc006.distorted_inputs()
+        images, labels = bbbc006.distorted_inputs()
 
         # Build a Graph that computes the logits predictions from the
         # inference model.
