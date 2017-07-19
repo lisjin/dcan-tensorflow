@@ -20,10 +20,11 @@ from __future__ import print_function
 
 from datetime import datetime
 import time
+import logging
+import tensorflow as tf
+
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Get rid of command line warnings
-
-import tensorflow as tf
 
 import bbbc006
 
@@ -44,7 +45,13 @@ tf.logging.set_verbosity(tf.logging.DEBUG)
 def train():
     """Train BBBC006 for a number of steps."""
     with tf.Graph().as_default():
+        ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
+        global_step_init = -1
         global_step = tf.contrib.framework.get_or_create_global_step()
+        if ckpt and ckpt.model_checkpoint_path:
+            # Restores from checkpoint
+            global_step_init = int(ckpt.model_checkpoint_path.split('/')[-1]
+                                   .split('-')[-1])
 
         # Get images and labels for BBBC006.
         # Force input pipeline to CPU:0 to avoid operations sometimes ending up
@@ -66,7 +73,7 @@ def train():
             """Logs loss and runtime."""
 
             def begin(self):
-                self._step = -1
+                self._step = global_step_init
                 self._start_time = time.time()
 
             def before_run(self, run_context):
@@ -88,6 +95,7 @@ def train():
                     print(format_str % (datetime.now(), self._step, loss_value,
                                         examples_per_sec, sec_per_batch))
 
+        saver = tf.train.Saver()
         with tf.train.MonitoredTrainingSession(
                 checkpoint_dir=FLAGS.train_dir,
                 hooks=[tf.train.StopAtStepHook(last_step=FLAGS.max_steps),
@@ -95,15 +103,16 @@ def train():
                        _LoggerHook()],
                 config=tf.ConfigProto(
                     log_device_placement=FLAGS.log_device_placement)) as mon_sess:
+            ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
+
+            if ckpt:
+                saver.restore(mon_sess, ckpt.model_checkpoint_path)
+                logging.info("Model restored from file: %s" % ckpt.model_checkpoint_path)
             while not mon_sess.should_stop():
-                print(mon_sess.run(global_step))
                 mon_sess.run(train_op)
 
 
 def main(argv=None):  # pylint: disable=unused-argument
-    if tf.gfile.Exists(FLAGS.train_dir):
-        tf.gfile.DeleteRecursively(FLAGS.train_dir)
-    tf.gfile.MakeDirs(FLAGS.train_dir)
     train()
 
 

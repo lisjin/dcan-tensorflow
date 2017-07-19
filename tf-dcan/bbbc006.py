@@ -14,7 +14,6 @@
 # ==============================================================================
 
 """Builds the BBBC006 network."""
-# pylint: disable=missing-docstring
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
@@ -226,7 +225,7 @@ def inference(images):
 
             # Convolution, activation, and possible dropout
             conv = conv_layer(in_layer, weights_tmp, biases_tmp, scope.name, layer)
-            # _activation_summary(conv)
+            _activation_summary(conv)
 
         # POOL
         if 0 < layer:  # Convolution layer 0 has no max pooling afterwards
@@ -236,8 +235,10 @@ def inference(images):
                                   padding='SAME',
                                   name='pool' + str(layer + 1))
             in_layer = pool
+            _activation_summary(pool)
         else:
             in_layer = conv
+
         if layer > 2:
             # Transposed convolution and output mapping for segments and contours
             for i in range(2):
@@ -262,6 +263,8 @@ def inference(images):
                                           deconv_c=deconv_c,
                                           bias=biases_tmp,
                                           scope_name=scope.name)
+                    _activation_summary(deconv)
+
                     if i == 0:
                         c_output_maps.append(deconv)
                     else:
@@ -299,12 +302,13 @@ def loss(c_fuse, s_fuse, labels):
 
     for j in range(2):
         prefix = 'c' if j == 0 else 's'
-        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=c_flat_labels if j == 0 else s_flat_labels,
-            logits=c_flat_logits if j == 0 else s_flat_logits,
-            name=prefix + '_cross_entropy_per_example')
-        cross_entropy_mean = tf.reduce_mean(cross_entropy, name='cross_entropy')
-        tf.add_to_collection('losses', cross_entropy_mean)
+        with tf.variable_scope('cross_entropy_' + prefix) as scope:
+            cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                labels=c_flat_labels if j == 0 else s_flat_labels,
+                logits=c_flat_logits if j == 0 else s_flat_logits,
+                name=prefix + '_cross_entropy_per_example')
+            cross_entropy_mean = tf.reduce_mean(cross_entropy, name=scope.name)
+            tf.add_to_collection('losses', cross_entropy_mean)
 
     return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
@@ -360,7 +364,7 @@ def train(total_loss, global_step):
                                     decay_steps,
                                     LEARNING_RATE_DECAY_FACTOR,
                                     staircase=True)
-    # tf.summary.scalar('learning_rate', lr)
+    tf.summary.scalar('learning_rate', lr)
 
     # Generate moving averages of all losses and associated summaries.
     loss_averages_op = _add_loss_summaries(total_loss)
@@ -374,13 +378,13 @@ def train(total_loss, global_step):
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
     # Add histograms for trainable variables.
-    # for var in tf.trainable_variables():
-        # tf.summary.histogram(var.op.name, var)
+    for var in tf.trainable_variables():
+        tf.summary.histogram(var.op.name, var)
 
     # Add histograms for gradients.
-    # for grad, var in grads:
-    #     if grad is not None:
-    #         tf.summary.histogram(var.op.name + '/gradients', grad)
+    for grad, var in grads:
+        if grad is not None:
+            tf.summary.histogram(var.op.name + '/gradients', grad)
 
     # Track the moving averages of all trainable variables.
     variable_averages = tf.train.ExponentialMovingAverage(
