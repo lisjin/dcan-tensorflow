@@ -60,8 +60,8 @@ def read_bbbc006(filename_queue, contours_queue, segments_queue):
     # Dimensions of the images in the BBBC006 dataset.
     # See http://www.cs.toronto.edu/~kriz/BBBC006.html for a description of the
     # input format.
-    result.height = 696
-    result.width = 520
+    result.height = 520
+    result.width = 696
     result.depth = 1
     # Every record consists of a label followed by the image, with a
     # fixed number of bytes for each.
@@ -86,7 +86,7 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
 
     Args:
       image: 3-D Tensor of [height, width, 1] of type.float32.
-      label 3-D Tensor of [height, width, 1] of type.float32.
+      label: 3-D Tensor of [height, width, 1] of type.int32.
       min_queue_examples: int32, minimum number of samples to retain
         in the queue that provides of batches of examples.
       batch_size: Number of images per batch.
@@ -231,6 +231,9 @@ def inputs(eval_data, data_dir, batch_size):
     # Set the shapes of tensors.
     float_image.set_shape([read_input.height, read_input.width, 1])
     read_input.label.set_shape([read_input.height, read_input.width, 2])
+
+    # Set max intensity to 1
+    read_input.label = tf.cast(tf.divide(read_input.label, 255), tf.int32)
 
     # Ensure that the random shuffling has good mixing properties.
     min_fraction_of_examples_in_queue = 0.4

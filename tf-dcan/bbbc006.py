@@ -23,13 +23,12 @@ import os
 import re
 
 import tensorflow as tf
-
 import bbbc006_input
 
 FLAGS = tf.app.flags.FLAGS
 
 # Basic model parameters.
-tf.app.flags.DEFINE_integer('batch_size', 1,
+tf.app.flags.DEFINE_integer('batch_size', 5,
                             """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_string('data_dir', 'data',
                            """Path to the BBBC006 data directory.""")
@@ -46,7 +45,7 @@ NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 350.0  # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
-INITIAL_LEARNING_RATE = 0.1  # Initial learning rate.
+INITIAL_LEARNING_RATE = 0.001  # Initial learning rate.
 
 # Constants for the model architecture.
 NUM_LAYERS = 6
@@ -148,7 +147,7 @@ def inputs(eval_data):
 
     Returns:
       images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
-      labels: Labels. 1D tensor of [batch_size] size.
+      labels: Labels. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 2] size.
 
     Raises:
       ValueError: If no data_dir
@@ -227,7 +226,7 @@ def inference(images):
 
             # Convolution, activation, and possible dropout
             conv = conv_layer(in_layer, weights_tmp, biases_tmp, scope.name, layer)
-            _activation_summary(conv)
+            # _activation_summary(conv)
 
         # POOL
         if 0 < layer:  # Convolution layer 0 has no max pooling afterwards
@@ -239,23 +238,22 @@ def inference(images):
             in_layer = pool
         else:
             in_layer = conv
-
         if layer > 2:
             # Transposed convolution and output mapping for segments and contours
             for i in range(2):
                 # TRANSPOSED CONVOLUTION
-                with tf.variable_scope('deconv' + str(layer + 1)) as scope:
+                with tf.variable_scope('deconv' + str(layer + 1) + '_' + str(i)) as scope:
                     deconv_in = in_layer
                     channels = deconv_in.get_shape().as_list()[3]
-                    shape = [deconv_c * 2, deconv_c * 2, channels, channels]
-                    weights_tmp = _var_with_weight_decay('weights' + str(i),
+                    shape = [deconv_c * 2, deconv_c * 2, 2, channels]
+                    weights_tmp = _var_with_weight_decay('weights',
                                                          shape=shape,
                                                          stddev=0.01,
-                                                         wd=0.0)
-                    biases_tmp = _var_on_cpu('biases' + str(i),
-                                             [features],
-                                             tf.constant_initializer(0.0))
-                    deconv_shape[3] = channels
+                                                         wd=0.004)
+                    biases_tmp = _var_on_cpu('biases',
+                                             [2],
+                                             tf.constant_initializer(0.1))
+                    deconv_shape[3] = 2
 
                     # Deconvolution
                     deconv = deconv_layer(value=deconv_in,
@@ -263,27 +261,11 @@ def inference(images):
                                           output_shape=deconv_shape,
                                           deconv_c=deconv_c,
                                           bias=biases_tmp,
-                                          scope_name=scope.name + '_' + str(i))
-
-                # OUTPUT MAPS (result 1 X 1 convolution)
-                with tf.variable_scope('output_map' + str(layer + 1)) as scope:
-                    channels = deconv.get_shape().as_list()[3]
-                    shape = [1, 1, channels, 1]
-                    weights_tmp = _var_with_weight_decay('weights' + str(i),
-                                                         shape=shape,
-                                                         stddev=0.01,
-                                                         wd=0.0)
-                    biases_tmp = _var_on_cpu('biases' + str(i),
-                                             [1],
-                                             tf.constant_initializer(0.0))
-
-                    conv = tf.nn.conv2d(deconv, weights_tmp, [1, 1, 1, 1], padding='SAME')
-                    output_map = tf.nn.relu(tf.nn.bias_add(conv, biases_tmp),
-                                            name=scope.name + '_' + str(i))
+                                          scope_name=scope.name)
                     if i == 0:
-                        c_output_maps.append(output_map)
+                        c_output_maps.append(deconv)
                     else:
-                        s_output_maps.append(output_map)
+                        s_output_maps.append(deconv)
             deconv_c *= 2
 
     # Get fusion layers for contours and segments, append to output maps list
@@ -312,8 +294,8 @@ def loss(c_fuse, s_fuse, labels):
     c_flat_labels = tf.reshape(contours_labels, [-1])
     s_flat_labels = tf.reshape(segments_labels, [-1])
 
-    c_flat_logits = tf.reshape(c_fuse, [-1, 1])
-    s_flat_logits = tf.reshape(s_fuse, [-1, 1])
+    c_flat_logits = tf.reshape(c_fuse, [-1, 2])
+    s_flat_logits = tf.reshape(s_fuse, [-1, 2])
 
     for j in range(2):
         prefix = 'c' if j == 0 else 's'
@@ -348,7 +330,7 @@ def _add_loss_summaries(total_loss):
     for l in losses + [total_loss]:
         # Name each loss as '(raw)' and name the moving average version of the loss
         # as the original loss name.
-        tf.summary.scalar(l.op.name + ' (raw)', l)
+        tf.summary.scalar(l.op.name + '_raw', l)
         tf.summary.scalar(l.op.name, loss_averages.average(l))
 
     return loss_averages_op
@@ -369,7 +351,8 @@ def train(total_loss, global_step):
     """
     # Variables that affect learning rate.
     num_batches_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / FLAGS.batch_size
-    decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
+    # decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
+    decay_steps = 10000
 
     # Decay the learning rate exponentially based on the number of steps.
     lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,
@@ -377,7 +360,7 @@ def train(total_loss, global_step):
                                     decay_steps,
                                     LEARNING_RATE_DECAY_FACTOR,
                                     staircase=True)
-    tf.summary.scalar('learning_rate', lr)
+    # tf.summary.scalar('learning_rate', lr)
 
     # Generate moving averages of all losses and associated summaries.
     loss_averages_op = _add_loss_summaries(total_loss)
@@ -391,13 +374,13 @@ def train(total_loss, global_step):
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
 
     # Add histograms for trainable variables.
-    for var in tf.trainable_variables():
-        tf.summary.histogram(var.op.name, var)
+    # for var in tf.trainable_variables():
+        # tf.summary.histogram(var.op.name, var)
 
     # Add histograms for gradients.
-    for grad, var in grads:
-        if grad is not None:
-            tf.summary.histogram(var.op.name + '/gradients', grad)
+    # for grad, var in grads:
+    #     if grad is not None:
+    #         tf.summary.histogram(var.op.name + '/gradients', grad)
 
     # Track the moving averages of all trainable variables.
     variable_averages = tf.train.ExponentialMovingAverage(
