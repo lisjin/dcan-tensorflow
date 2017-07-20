@@ -45,10 +45,10 @@ tf.logging.set_verbosity(tf.logging.DEBUG)
 
 
 def tower_loss(scope, images, labels):
-    """Calculate the total loss on a single tower running the CIFAR model.
+    """Calculate the total loss on a single tower running the BBBC006 model.
 
     Args:
-      scope: unique prefix string identifying the CIFAR tower, e.g. 'tower_0'
+      scope: unique prefix string identifying the BBBC006 tower, e.g. 'tower_0'
       images: Images. 4D tensor of shape [batch_size, height, width, 3].
       labels: Labels. 1D tensor of shape [batch_size].
 
@@ -156,13 +156,13 @@ def train():
         # Calculate the gradients for each model tower.
         tower_grads = []
         with tf.variable_scope(tf.get_variable_scope()):
-            for i in range(FLAGS.num_gpus):
+            for i in xrange(FLAGS.num_gpus):
                 with tf.device('/gpu:%d' % i):
                     with tf.name_scope('%s_%d' % (bbbc006.TOWER_NAME, i)) as scope:
                         # Dequeues one batch for the GPU
                         image_batch, label_batch = batch_queue.dequeue()
-                        # Calculate the loss for one tower of the CIFAR model. This function
-                        # constructs the entire CIFAR model but shares the variables across
+                        # Calculate the loss for one tower of the model. This function
+                        # constructs the entire model but shares the variables across
                         # all towers.
                         loss = tower_loss(scope, image_batch, label_batch)
 
@@ -172,7 +172,7 @@ def train():
                         # Retain the summaries from the final tower.
                         summaries = tf.get_collection(tf.GraphKeys.SUMMARIES, scope)
 
-                        # Calculate the gradients for the batch of data on this CIFAR tower.
+                        # Calculate the gradients for the batch of data on this tower.
                         grads = opt.compute_gradients(loss)
 
                         # Keep track of the gradients across all towers.
@@ -227,7 +227,7 @@ def train():
 
         summary_writer = tf.summary.FileWriter(FLAGS.train_dir, sess.graph)
 
-        for step in range(FLAGS.max_steps):
+        for step in xrange(FLAGS.max_steps):
             start_time = time.time()
             _, loss_value = sess.run([train_op, loss])
             duration = time.time() - start_time

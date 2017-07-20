@@ -119,24 +119,11 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
     return images, labels
 
 
-def distorted_inputs(data_dir, batch_size):
-    """Construct distorted input for BBBC006 training using the Reader ops.
-
-    Args:
-      data_dir: Path to the BBBC006 data directory.
-      batch_size: Number of images per batch.
-
-    Returns:
-      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
-      labels: Labels. 1D tensor of [batch_size] size.
-    """
-    filenames = [os.path.join(data_dir, 'BBBC006_v1_train')]
-    for f in filenames:
-        if not tf.gfile.Exists(f):
-            raise ValueError('Failed to find file: ' + f)
-
-    contours = get_png_files(os.path.join(data_dir, 'BBBC006_v1_contours'))
-    segments = get_png_files(os.path.join(data_dir, 'BBBC006_v1_segments'))
+def get_read_input(data_dir, eval_data=False):
+    pref = 'test' if eval_data else 'train'
+    filenames = get_png_files(os.path.join(data_dir, 'BBBC006_v1_' + pref))
+    contours = get_png_files(os.path.join(data_dir, 'BBBC006_v1_contours_' + pref))
+    segments = get_png_files(os.path.join(data_dir, 'BBBC006_v1_segments_' + pref))
 
     for f in filenames + contours + segments:
         if not tf.gfile.Exists(f):
@@ -151,6 +138,22 @@ def distorted_inputs(data_dir, batch_size):
     read_input = read_bbbc006(filename_queue, contours_queue, segments_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
     read_input.label = tf.cast(read_input.label, tf.int32)
+
+    return read_input, reshaped_image
+
+
+def distorted_inputs(data_dir, batch_size):
+    """Construct distorted input for BBBC006 training using the Reader ops.
+
+    Args:
+      data_dir: Path to the BBBC006 data directory.
+      batch_size: Number of images per batch.
+
+    Returns:
+      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+      labels: Labels. 1D tensor of [batch_size] size.
+    """
+    read_input, reshaped_image = get_read_input(data_dir)
 
     # Image processing for training the network. Note the many random
     # distortions applied to the image.
@@ -203,29 +206,8 @@ def inputs(eval_data, data_dir, batch_size):
       images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
       labels: Labels. 1D tensor of [batch_size] size.
     """
-    if not eval_data:
-        filenames = get_png_files(os.path.join(data_dir, 'BBBC006_v1_train'))
-        num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
-    else:
-        filenames = get_png_files(os.path.join(data_dir, 'BBBC006_v1_test'))
-        num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
-
-    contours = get_png_files(os.path.join(data_dir, 'BBBC006_v1_contours'))
-    segments = get_png_files(os.path.join(data_dir, 'BBBC006_v1_segments'))
-
-    for f in filenames + contours + segments:
-        if not tf.gfile.Exists(f):
-            raise ValueError('Failed to find file: ' + f)
-
-    # Create queues that produce the filenames and labels to read.
-    filename_queue = tf.train.string_input_producer(filenames)
-    contours_queue = tf.train.string_input_producer(contours)
-    segments_queue = tf.train.string_input_producer(segments)
-
-    # Read examples from files in the filename queue.
-    read_input = read_bbbc006(filename_queue, contours_queue, segments_queue)
-    reshaped_image = tf.cast(read_input.uint8image, tf.float32)
-    read_input.label = tf.cast(read_input.label, tf.int32)
+    num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
+    read_input, reshaped_image = get_read_input(data_dir, eval_data)
 
     # Image processing for evaluation.
 
