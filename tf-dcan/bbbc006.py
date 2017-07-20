@@ -27,7 +27,7 @@ import bbbc006_input
 FLAGS = tf.app.flags.FLAGS
 
 # Basic model parameters.
-tf.app.flags.DEFINE_integer('batch_size', 5,
+tf.app.flags.DEFINE_integer('batch_size', 1,
                             """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_string('data_dir', 'data',
                            """Path to the BBBC006 data directory.""")
@@ -42,13 +42,14 @@ NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
 # Constants describing the training process.
 MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
-NUM_EPOCHS_PER_DECAY = 350.0  # Epochs after which learning rate decays.
+NUM_EPOCHS_PER_DECAY = 72.0  # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.001  # Initial learning rate.
 
 # Constants for the model architecture.
 NUM_LAYERS = 6
 FEAT_ROOT = 32
+DISCOUNT_WEIGHT = 0.1
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -265,6 +266,9 @@ def inference(images):
                                           scope_name=scope.name)
                     _activation_summary(deconv)
 
+                    if layer < NUM_LAYERS - 1:
+                        deconv = tf.scalar_mul(tf.constant(DISCOUNT_WEIGHT), deconv)
+
                     if i == 0:
                         c_output_maps.append(deconv)
                     else:
@@ -355,8 +359,7 @@ def train(total_loss, global_step):
     """
     # Variables that affect learning rate.
     num_batches_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / FLAGS.batch_size
-    # decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
-    decay_steps = 10000
+    decay_steps = int(num_batches_per_epoch * NUM_EPOCHS_PER_DECAY)
 
     # Decay the learning rate exponentially based on the number of steps.
     lr = tf.train.exponential_decay(INITIAL_LEARNING_RATE,
