@@ -33,12 +33,15 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/bbbc006_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 1000000,
+tf.app.flags.DEFINE_integer('max_steps', 40000,
                             """Number of batches to run.""")
-tf.app.flags.DEFINE_integer('num_gpus', 1,
+tf.app.flags.DEFINE_integer('num_gpus', 2,
                             """How many GPUs to use.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
+tf.app.flags.DEFINE_integer('log_frequency', 10,
+                            """How often to log results to the console.""")
+tf.logging.set_verbosity(tf.logging.DEBUG)
 
 
 def tower_loss(scope, images, labels):
@@ -54,11 +57,11 @@ def tower_loss(scope, images, labels):
     """
 
     # Build inference Graph.
-    logits = bbbc006.inference(images)
+    c_fuse, s_fuse = bbbc006.inference(images)
 
     # Build the portion of the Graph calculating the losses. Note that we will
     # assemble the total_loss using a custom function below.
-    _ = bbbc006.loss(logits, labels)
+    _ = bbbc006.loss(c_fuse, s_fuse, labels)
 
     # Assemble all of the losses for the current tower only.
     losses = tf.get_collection('losses', scope)
@@ -120,9 +123,16 @@ def train():
     with tf.Graph().as_default(), tf.device('/cpu:0'):
         # Create a variable to count the number of train() calls. This equals the
         # number of batches processed * FLAGS.num_gpus.
+        global_step_init = 0
+        ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
+        if ckpt and ckpt.model_checkpoint_path:
+            # Restores from checkpoint
+            global_step_init = int(ckpt.model_checkpoint_path.split('/')[-1]
+                                   .split('-')[-1])
+            print(global_step_init)
         global_step = tf.get_variable(
             'global_step', [],
-            initializer=tf.constant_initializer(0), trainable=False)
+            initializer=tf.constant_initializer(global_step_init), trainable=False)
 
         # Calculate the learning rate schedule.
         num_batches_per_epoch = (bbbc006.NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN /
@@ -137,16 +147,16 @@ def train():
                                         staircase=True)
 
         # Create an optimizer that performs gradient descent.
-        opt = tf.train.GradientDescentOptimizer(lr)
+        opt = tf.train.MomentumOptimizer(learning_rate=lr, momentum=0.2)
 
         # Get images and labels for BBBC006.
-        images, labels = bbbc006.distorted_inputs()
+        images, labels = bbbc006.inputs(eval_data=False)
         batch_queue = tf.contrib.slim.prefetch_queue.prefetch_queue(
             [images, labels], capacity=2 * FLAGS.num_gpus)
         # Calculate the gradients for each model tower.
         tower_grads = []
         with tf.variable_scope(tf.get_variable_scope()):
-            for i in xrange(FLAGS.num_gpus):
+            for i in range(FLAGS.num_gpus):
                 with tf.device('/gpu:%d' % i):
                     with tf.name_scope('%s_%d' % (bbbc006.TOWER_NAME, i)) as scope:
                         # Dequeues one batch for the GPU
@@ -217,7 +227,7 @@ def train():
 
         summary_writer = tf.summary.FileWriter(FLAGS.train_dir, sess.graph)
 
-        for step in xrange(FLAGS.max_steps):
+        for step in range(FLAGS.max_steps):
             start_time = time.time()
             _, loss_value = sess.run([train_op, loss])
             duration = time.time() - start_time
@@ -239,15 +249,12 @@ def train():
                 summary_writer.add_summary(summary_str, step)
 
             # Save the model checkpoint periodically.
-            if step % 1000 == 0 or (step + 1) == FLAGS.max_steps:
+            if step % 25 == 0 or (step + 1) == FLAGS.max_steps:
                 checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
                 saver.save(sess, checkpoint_path, global_step=step)
 
 
 def main(argv=None):  # pylint: disable=unused-argument
-    if tf.gfile.Exists(FLAGS.train_dir):
-        tf.gfile.DeleteRecursively(FLAGS.train_dir)
-    tf.gfile.MakeDirs(FLAGS.train_dir)
     train()
 
 

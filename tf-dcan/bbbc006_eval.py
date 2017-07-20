@@ -57,9 +57,6 @@ def eval_once(saver, summary_writer, top_k_op, summary_op):
         if ckpt and ckpt.model_checkpoint_path:
             # Restores from checkpoint
             saver.restore(sess, ckpt.model_checkpoint_path)
-            # Assuming model_checkpoint_path looks something like:
-            #   /my-favorite-path/bbbc006_train/model.ckpt-0,
-            # extract global_step from it.
             global_step = ckpt.model_checkpoint_path.split('/')[-1].split('-')[-1]
         else:
             print('No checkpoint file found')
@@ -98,9 +95,9 @@ def eval_once(saver, summary_writer, top_k_op, summary_op):
 
 
 def evaluate():
-    """Eval CIFAR-10 for a number of steps."""
+    """Eval BBBC006 for a number of steps."""
     with tf.Graph().as_default() as g:
-        # Get images and labels for CIFAR-10.
+        # Get images and labels for BBBC006.
         eval_data = FLAGS.eval_data == 'test'
         images, labels = bbbc006.inputs(eval_data=eval_data)
 

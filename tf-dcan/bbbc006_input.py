@@ -135,8 +135,12 @@ def distorted_inputs(data_dir, batch_size):
         if not tf.gfile.Exists(f):
             raise ValueError('Failed to find file: ' + f)
 
-    contours = [os.path.join(data_dir, 'BBBC006_v1_contours')]
-    segments = [os.path.join(data_dir, 'BBBC006_v1_segments')]
+    contours = get_png_files(os.path.join(data_dir, 'BBBC006_v1_contours'))
+    segments = get_png_files(os.path.join(data_dir, 'BBBC006_v1_segments'))
+
+    for f in filenames + contours + segments:
+        if not tf.gfile.Exists(f):
+            raise ValueError('Failed to find file: ' + f)
 
     # Create queues that produce the filenames and labels to read.
     filename_queue = tf.train.string_input_producer(filenames)
