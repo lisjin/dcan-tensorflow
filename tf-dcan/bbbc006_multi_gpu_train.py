@@ -33,13 +33,13 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/bbbc006_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 40000,
+tf.app.flags.DEFINE_integer('max_steps', 2000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_integer('num_gpus', 2,
                             """How many GPUs to use.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
-tf.app.flags.DEFINE_integer('log_frequency', 10,
+tf.app.flags.DEFINE_integer('log_frequency', 2,
                             """How often to log results to the console.""")
 tf.logging.set_verbosity(tf.logging.DEBUG)
 
@@ -129,7 +129,7 @@ def train():
             # Restores from checkpoint
             global_step_init = int(ckpt.model_checkpoint_path.split('/')[-1]
                                    .split('-')[-1])
-            print(global_step_init)
+            print('Continuing from step %d' % global_step_init)
         global_step = tf.get_variable(
             'global_step', [],
             initializer=tf.constant_initializer(global_step_init), trainable=False)
@@ -249,7 +249,7 @@ def train():
                 summary_writer.add_summary(summary_str, step)
 
             # Save the model checkpoint periodically.
-            if step % 25 == 0 or (step + 1) == FLAGS.max_steps:
+            if step % 5 == 0 or (step + 1) == FLAGS.max_steps:
                 checkpoint_path = os.path.join(FLAGS.train_dir, 'model.ckpt')
                 saver.save(sess, checkpoint_path, global_step=step)
 
