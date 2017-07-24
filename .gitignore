@@ -4,6 +4,7 @@ data/
 .idea/
 
 *.mat
+*.csv
 *.pyc
 sftp-config.json
 .DS_Store

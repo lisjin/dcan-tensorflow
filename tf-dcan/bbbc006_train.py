@@ -56,7 +56,7 @@ def train():
         # Get images and labels for BBBC006.
         # Force input pipeline to CPU:0 to avoid operations sometimes ending up
         # on GPU and resulting in a slow down.
-        images, labels = bbbc006.inputs(eval_data=False)
+        images, labels = bbbc006.inputs(eval_data='train')
 
         # Build a Graph that computes the logits predictions from the
         # inference model.

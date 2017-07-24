@@ -18,7 +18,6 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-import os
 import re
 
 import tensorflow as tf
@@ -49,7 +48,7 @@ INITIAL_LEARNING_RATE = 0.001  # Initial learning rate.
 # Constants for the model architecture.
 NUM_LAYERS = 6
 FEAT_ROOT = 32
-DISCOUNT_WEIGHT = 0.25
+DISCOUNT_WEIGHT = 0.1
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -119,7 +118,7 @@ def _var_with_weight_decay(name, shape, stddev, wd):
 
 
 def distorted_inputs():
-    """Construct distorted input for CIFAR training using the Reader ops.
+    """Construct distorted input for BBBC006 training using the Reader ops.
 
     Returns:
       images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
@@ -130,9 +129,7 @@ def distorted_inputs():
     """
     if not FLAGS.data_dir:
         raise ValueError('Please supply a data_dir')
-    data_dir = os.path.join(FLAGS.data_dir)
-    images, labels = bbbc006_input.distorted_inputs(data_dir=data_dir,
-                                                    batch_size=FLAGS.batch_size)
+    images, labels = bbbc006_input.distorted_inputs(batch_size=FLAGS.batch_size)
     if FLAGS.use_fp16:
         images = tf.cast(images, tf.float16)
         labels = tf.cast(labels, tf.float16)
@@ -140,7 +137,7 @@ def distorted_inputs():
 
 
 def inputs(eval_data):
-    """Construct input for CIFAR evaluation using the Reader ops.
+    """Construct input for BBBC006 evaluation using the Reader ops.
 
     Args:
       eval_data: bool, indicating if one should use the train or eval data set.
@@ -412,10 +409,10 @@ def dice_op(c_fuse, s_fuse, labels):
     s_logits = tf.nn.softmax(tf.split(s_fuse, 2, 3)[1])
     c_labels, s_labels = tf.split(labels, 2, 3)
 
-    tf.summary.image('c_logits', c_logits, max_outputs=FLAGS.batch_size)
-    tf.summary.image('s_logits', s_logits, max_outputs=FLAGS.batch_size)
-    tf.summary.image('c_labels', c_labels, max_outputs=FLAGS.batch_size)
-    tf.summary.image('s_labels', s_labels, max_outputs=FLAGS.batch_size)
+    tf.summary.image('c_logits', c_logits)
+    tf.summary.image('s_logits', s_logits)
+    tf.summary.image('c_labels', c_labels)
+    tf.summary.image('s_labels', s_labels)
 
     c_dice = get_dice_coef(c_logits, c_labels)
     s_dice = get_dice_coef(s_logits, s_labels)

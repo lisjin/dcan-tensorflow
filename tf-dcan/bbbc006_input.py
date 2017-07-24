@@ -20,6 +20,7 @@ from __future__ import print_function
 
 import os
 import tensorflow as tf
+
 import pandas as pd
 
 # Process images of this size.
@@ -166,15 +167,11 @@ def distorted_inputs(batch_size):
 
     # Image processing for training the network. Note the many random
     # distortions applied to the image.
-
-    # Randomly flip the image horizontally.
-    distorted_image = tf.image.random_flip_left_right(reshaped_image)
-
     # Because these operations are not commutative, consider randomizing
     # the order their operation.
     # NOTE: since per_image_standardization zeros the mean and makes
     # the stddev unit, this likely has no effect see tensorflow#1458.
-    distorted_image = tf.image.random_brightness(distorted_image,
+    distorted_image = tf.image.random_brightness(reshaped_image,
                                                  max_delta=63)
     distorted_image = tf.image.random_contrast(distorted_image,
                                                lower=0.2, upper=1.8)
@@ -186,12 +183,15 @@ def distorted_inputs(batch_size):
     float_image.set_shape([read_input.height, read_input.width, 1])
     read_input.label.set_shape([read_input.height, read_input.width, 2])
 
+    # Set max intensity to 1
+    read_input.label = tf.cast(tf.divide(read_input.label, 255), tf.int32)
+
     # Ensure that the random shuffling has good mixing properties.
     min_fraction_of_examples_in_queue = 0.4
     min_queue_examples = int(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN *
                              min_fraction_of_examples_in_queue)
-    print('Filling queue with %d BBBC006 images before starting to train. '
-          'This will take a few minutes.' % min_queue_examples)
+    print('Filling queue with %d BBBC006 images before starting to train.'
+          % min_queue_examples)
 
     # Generate a batch of images and labels by building up a queue of examples.
     return _generate_image_and_label_batch(float_image, read_input.label,

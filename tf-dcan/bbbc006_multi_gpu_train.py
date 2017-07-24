@@ -144,7 +144,7 @@ def train():
         opt = tf.train.MomentumOptimizer(learning_rate=lr, momentum=0.2)
 
         # Get images and labels for BBBC006.
-        images, labels = bbbc006.inputs(eval_data=False)
+        images, labels = bbbc006.inputs(eval_data='train')
         batch_queue = tf.contrib.slim.prefetch_queue.prefetch_queue(
             [images, labels], capacity=2 * FLAGS.num_gpus)
         # Calculate the gradients for each model tower.
