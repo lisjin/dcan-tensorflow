@@ -154,9 +154,7 @@ def inputs(eval_data):
     """
     if not FLAGS.data_dir:
         raise ValueError('Please supply a data_dir')
-    data_dir = os.path.join(FLAGS.data_dir)
     images, labels = bbbc006_input.inputs(eval_data=eval_data,
-                                          data_dir=data_dir,
                                           batch_size=FLAGS.batch_size)
     if FLAGS.use_fp16:
         images = tf.cast(images, tf.float16)
@@ -398,3 +396,28 @@ def train(total_loss, global_step):
         train_op = tf.no_op(name='train')
 
     return train_op
+
+
+def get_dice_coef(logits, labels, smooth=1e-5):
+    axis = [1, 2, 3]
+    inter = tf.reduce_sum(tf.multiply(logits, labels), axis=axis)
+    left = tf.reduce_sum(logits, axis=axis)
+    right = tf.reduce_sum(labels, axis=axis)
+    return tf.reduce_mean((2 * inter + smooth) / (left + right + smooth))
+
+
+def dice_op(c_fuse, s_fuse, labels):
+    labels = tf.cast(labels, tf.float32)
+    c_logits = tf.nn.softmax(tf.split(c_fuse, 2, 3)[1])
+    s_logits = tf.nn.softmax(tf.split(s_fuse, 2, 3)[1])
+    c_labels, s_labels = tf.split(labels, 2, 3)
+
+    tf.summary.image('c_logits', c_logits, max_outputs=FLAGS.batch_size)
+    tf.summary.image('s_logits', s_logits, max_outputs=FLAGS.batch_size)
+    tf.summary.image('c_labels', c_labels, max_outputs=FLAGS.batch_size)
+    tf.summary.image('s_labels', s_labels, max_outputs=FLAGS.batch_size)
+
+    c_dice = get_dice_coef(c_logits, c_labels)
+    s_dice = get_dice_coef(s_logits, s_labels)
+
+    return c_dice, s_dice

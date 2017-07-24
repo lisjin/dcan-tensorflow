@@ -20,6 +20,7 @@ from __future__ import print_function
 
 import os
 import tensorflow as tf
+import pandas as pd
 
 # Process images of this size.
 IMAGE_WIDTH = 696
@@ -30,7 +31,11 @@ NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = 692
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = 76
 
 
-def read_bbbc006(filename_queue, contours_queue, segments_queue):
+def read_from_queue(path):
+    return tf.image.decode_png(path, channels=1, dtype=tf.uint8)
+
+
+def read_bbbc006(all_files_queue):
     """Reads and parses examples from BBBC006 data files.
 
     Recommendation: if you want N-way read parallelism, call this function
@@ -58,23 +63,20 @@ def read_bbbc006(filename_queue, contours_queue, segments_queue):
     result = BBBC006Record()
 
     # Dimensions of the images in the BBBC006 dataset.
-    # See http://www.cs.toronto.edu/~kriz/BBBC006.html for a description of the
-    # input format.
     result.height = 520
     result.width = 696
     result.depth = 1
-    # Every record consists of a label followed by the image, with a
-    # fixed number of bytes for each.
 
     # Read a record, getting filenames from the filename_queue.
-    reader = tf.WholeFileReader()
-    result.key, value = reader.read(filename_queue)
-    result.contour_key, contour_value = reader.read(contours_queue)
-    result.segment_key, segment_value = reader.read(segments_queue)
+    text_reader = tf.TextLineReader()
+    _, csv_content = text_reader.read(all_files_queue)
 
-    result.uint8image = tf.image.decode_png(value, channels=1, dtype=tf.uint16)
-    contour = tf.image.decode_png(contour_value, channels=1, dtype=tf.uint8)
-    segment = tf.image.decode_png(segment_value, channels=1, dtype=tf.uint8)
+    i_path, c_path, s_path = tf.decode_csv(csv_content,
+                                           record_defaults=[[""], [""], [""]])
+
+    result.uint8image = read_from_queue(tf.read_file(i_path))
+    contour = read_from_queue(tf.read_file(c_path))
+    segment = read_from_queue(tf.read_file(s_path))
 
     result.label = tf.concat([contour, segment], 2)
     return result
@@ -119,41 +121,48 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
     return images, labels
 
 
-def get_read_input(data_dir, eval_data=False):
-    pref = 'test' if eval_data else 'train'
+def gen_csv_paths(data_dir, pref):
+    """
+    Generate CSV file from image, contour, and segment file paths.
+    :param data_dir: BBBC006 data directory path.
+    :param pref: Prefix (either 'train' or 'test')
+    :return: Nothing.
+    """
     filenames = get_png_files(os.path.join(data_dir, 'BBBC006_v1_' + pref))
-    contours = get_png_files(os.path.join(data_dir, 'BBBC006_v1_contours_' + pref))
-    segments = get_png_files(os.path.join(data_dir, 'BBBC006_v1_segments_' + pref))
+    contours = get_png_files(os.path.join(data_dir, 'BBBC006_v1_contours_'
+                                                     + pref))
+    segments = get_png_files(os.path.join(data_dir, 'BBBC006_v1_segments_'
+                                                     + pref))
 
-    for f in filenames + contours + segments:
-        if not tf.gfile.Exists(f):
-            raise ValueError('Failed to find file: ' + f)
+    all_files = [filenames, contours, segments]
+    pd_arr = pd.DataFrame(all_files).transpose()
+    pd_arr.to_csv(pref + '.csv', index=False, header=False)
 
+
+def get_read_input(eval_data=False):
     # Create queues that produce the filenames and labels to read.
-    filename_queue = tf.train.string_input_producer(filenames)
-    contours_queue = tf.train.string_input_producer(contours)
-    segments_queue = tf.train.string_input_producer(segments)
+    pref = 'test' if eval_data else 'train'
+    all_files_queue = tf.train.string_input_producer([pref + '.csv'])
 
     # Read examples from files in the filename queue.
-    read_input = read_bbbc006(filename_queue, contours_queue, segments_queue)
+    read_input = read_bbbc006(all_files_queue)
     reshaped_image = tf.cast(read_input.uint8image, tf.float32)
     read_input.label = tf.cast(read_input.label, tf.int32)
 
     return read_input, reshaped_image
 
 
-def distorted_inputs(data_dir, batch_size):
+def distorted_inputs(batch_size):
     """Construct distorted input for BBBC006 training using the Reader ops.
 
     Args:
-      data_dir: Path to the BBBC006 data directory.
       batch_size: Number of images per batch.
 
     Returns:
-      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
+      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 2] size.
       labels: Labels. 1D tensor of [batch_size] size.
     """
-    read_input, reshaped_image = get_read_input(data_dir)
+    read_input, reshaped_image = get_read_input()
 
     # Image processing for training the network. Note the many random
     # distortions applied to the image.
@@ -194,12 +203,11 @@ def get_png_files(dirname):
     return [dirname + '/' + f for f in os.listdir(dirname) if f.endswith('.png')]
 
 
-def inputs(eval_data, data_dir, batch_size):
+def inputs(eval_data, batch_size):
     """Construct input for BBBC006 evaluation using the Reader ops.
 
     Args:
       eval_data: bool, indicating if one should use the train or eval data set.
-      data_dir: Path to the BBBC006 data directory.
       batch_size: Number of images per batch.
 
     Returns:
@@ -207,7 +215,7 @@ def inputs(eval_data, data_dir, batch_size):
       labels: Labels. 1D tensor of [batch_size] size.
     """
     num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
-    read_input, reshaped_image = get_read_input(data_dir, eval_data)
+    read_input, reshaped_image = get_read_input(eval_data)
 
     # Image processing for evaluation.
 
