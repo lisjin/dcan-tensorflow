@@ -124,12 +124,6 @@ def train():
         # Create a variable to count the number of train() calls. This equals the
         # number of batches processed * FLAGS.num_gpus.
         global_step_init = 0
-        ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
-        if ckpt and ckpt.model_checkpoint_path:
-            # Restores from checkpoint
-            global_step_init = int(ckpt.model_checkpoint_path.split('/')[-1]
-                                   .split('-')[-1])
-            print('Continuing from step %d' % global_step_init)
         global_step = tf.get_variable(
             'global_step', [],
             initializer=tf.constant_initializer(global_step_init), trainable=False)

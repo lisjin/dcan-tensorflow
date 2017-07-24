@@ -49,7 +49,7 @@ INITIAL_LEARNING_RATE = 0.001  # Initial learning rate.
 # Constants for the model architecture.
 NUM_LAYERS = 6
 FEAT_ROOT = 32
-DISCOUNT_WEIGHT = 0.1
+DISCOUNT_WEIGHT = 0.25
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
