@@ -23,9 +23,6 @@ import time
 import logging
 import tensorflow as tf
 
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Get rid of command line warnings
-
 import bbbc006
 
 FLAGS = tf.app.flags.FLAGS
@@ -33,11 +30,11 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/bbbc006_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 2000,
+tf.app.flags.DEFINE_integer('max_steps', 40000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
-tf.app.flags.DEFINE_integer('log_frequency', 2,
+tf.app.flags.DEFINE_integer('log_frequency', 20,
                             """How often to log results to the console.""")
 tf.logging.set_verbosity(tf.logging.DEBUG)
 
@@ -60,10 +57,10 @@ def train():
 
         # Build a Graph that computes the logits predictions from the
         # inference model.
-        c_outputs, s_outputs = bbbc006.inference(images)
+        c_fuse, s_fuse = bbbc006.inference(images)
 
         # Calculate loss.
-        loss = bbbc006.loss(c_outputs, s_outputs, labels)
+        loss = bbbc006.loss(c_fuse, s_fuse, labels)
 
         # Build a Graph that trains the model with one batch of examples and
         # updates the model parameters.
