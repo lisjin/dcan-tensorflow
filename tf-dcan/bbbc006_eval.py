@@ -75,16 +75,15 @@ def eval_once(saver, dice_op, summary_writer, summary_op):
             step = 0
             while step < num_iter and not coord.should_stop():
                 c_dice, s_dice = sess.run(dice_op)
-                print(c_dice)
-                print(s_dice)
+                print('%d: c_dice = %.3f, s_dice = %.3f' % (step, c_dice, s_dice))
                 true_c_dice += c_dice
                 true_s_dice += s_dice
                 step += 1
 
             true_c_dice /= step
             true_s_dice /= step
-            print('%s: contour dice = %.3f' % (datetime.now(), true_c_dice))
-            print('%s: segment dice = %.3f' % (datetime.now(), true_s_dice))
+            print('%s: c_dice avg = %.3f' % (datetime.now(), true_c_dice))
+            print('%s: s_dice avg = %.3f' % (datetime.now(), true_s_dice))
 
             summary = tf.Summary()
             summary.ParseFromString(sess.run(summary_op))
@@ -107,9 +106,9 @@ def evaluate():
 
         # Build a Graph that computes the logits predictions from the
         # inference model.
-        c_outputs, s_outputs = bbbc006.inference(images, training=False)
+        c_outputs, s_outputs = bbbc006.inference(images)
 
-        dice_op = bbbc006.dice_op(c_outputs[-1], s_outputs[-1], labels)
+        dice_op = bbbc006.dice_op(c_outputs, s_outputs, labels)
 
         # Restore the moving average version of the learned variables for eval.
         variable_averages = tf.train.ExponentialMovingAverage(

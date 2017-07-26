@@ -23,9 +23,6 @@ import time
 import logging
 import tensorflow as tf
 
-import os
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Get rid of command line warnings
-
 import bbbc006
 
 FLAGS = tf.app.flags.FLAGS
@@ -33,11 +30,11 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/bbbc006_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
-tf.app.flags.DEFINE_integer('max_steps', 2000,
+tf.app.flags.DEFINE_integer('max_steps', 40000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
                             """Whether to log device placement.""")
-tf.app.flags.DEFINE_integer('log_frequency', 2,
+tf.app.flags.DEFINE_integer('log_frequency', 20,
                             """How often to log results to the console.""")
 tf.logging.set_verbosity(tf.logging.DEBUG)
 

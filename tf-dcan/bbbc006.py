@@ -26,7 +26,7 @@ import bbbc006_input
 FLAGS = tf.app.flags.FLAGS
 
 # Basic model parameters.
-tf.app.flags.DEFINE_integer('batch_size', 20,
+tf.app.flags.DEFINE_integer('batch_size', 1,
                             """Number of images to process in a batch.""")
 tf.app.flags.DEFINE_string('data_dir', 'data',
                            """Path to the BBBC006 data directory.""")
@@ -44,8 +44,8 @@ MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 72.0  # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.001  # Initial learning rate.
-DISCOUNT_WEIGHT = 0.1  # Weight for auxiliary classifier loss.
 DROPOUT_RATE = 0.5  # Probability for dropout layers.
+DISCOUNT_WEIGHT = 0.1  # Weight for auxiliary classifier loss.
 
 # Constants for the model architecture.
 NUM_LAYERS = 6
@@ -74,6 +74,44 @@ def _activation_summary(x):
     tensor_name = re.sub('%s_[0-9]*/' % TOWER_NAME, '', x.op.name)
     tf.summary.histogram(tensor_name + '/activations', x)
     tf.summary.scalar(tensor_name + '/sparsity', tf.nn.zero_fraction(x))
+
+
+def _variable_on_cpu(name, shape, initializer):
+    """Helper to create a Variable stored on CPU memory.
+    Args:
+      name: name of the variable
+      shape: list of ints
+      initializer: initializer for Variable
+    Returns:
+      Variable Tensor
+    """
+    dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
+    var = tf.get_variable(name, shape, initializer=initializer, dtype=dtype)
+    return var
+
+
+def _variable_with_weight_decay(name, shape, stddev, wd):
+    """Helper to create an initialized Variable with weight decay.
+    Note that the Variable is initialized with a truncated normal distribution.
+    A weight decay is added only if one is specified.
+    Args:
+      name: name of the variable
+      shape: list of ints
+      stddev: standard deviation of a truncated Gaussian
+      wd: add L2Loss weight decay multiplied by this float. If None, weight
+          decay is not added for this Variable.
+    Returns:
+      Variable Tensor
+    """
+    dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
+    var = _variable_on_cpu(
+        name,
+        shape,
+        tf.truncated_normal_initializer(stddev=stddev, dtype=dtype))
+    if wd is not None:
+        weight_decay = tf.multiply(tf.nn.l2_loss(var), wd, name='weight_loss')
+        tf.add_to_collection('losses', weight_decay)
+    return var
 
 
 def distorted_inputs():
@@ -118,35 +156,32 @@ def inputs(eval_data):
     return images, labels
 
 
-def conv_layer(in_layer, features, scope, training, layer):
-    conv = tf.layers.conv2d(in_layer, features, (3, 3), padding='same',
-                            kernel_initializer=tf.contrib.layers.
-                            xavier_initializer_conv2d(uniform=False),
-                            bias_initializer=tf.contrib.layers.
-                            xavier_initializer_conv2d(uniform=False),
-                            kernel_regularizer=tf.nn.l2_loss,
-                            name=scope.name)
-    conv = tf.nn.relu(tf.layers.batch_normalization(conv, training=training))
+def _conv_layer(in_layer, features, channels, scope, layer):
+    weights = _variable_with_weight_decay('weights', shape=[3, 3, channels, features],
+                                          stddev=0.001, wd=5e-4)
+    biases = _variable_on_cpu('biases', [features], tf.constant_initializer(0.0))
+    conv = tf.nn.relu(tf.nn.bias_add(tf.nn.conv2d(in_layer,
+                                                  weights,
+                                                  [1, 1, 1, 1],
+                                                  padding='SAME'),
+                                     biases, name=scope.name))
     if layer > 3:  # Add dropout to layers 5 and 6
         conv = tf.nn.dropout(conv, keep_prob=DROPOUT_RATE)
     return conv
 
 
-def deconv_layer(in_layer, dc, ds, scope, training):
+def _deconv_layer(in_layer, dc, ds, scope):
     shape = [dc * 2, dc * 2, 2, in_layer.get_shape().as_list()[-1]]
-    weight = tf.Variable(tf.contrib.layers.
-                         xavier_initializer_conv2d(uniform=False)
-                         (shape=shape))
-    bias = tf.Variable(tf.contrib.layers.
-                       xavier_initializer_conv2d(uniform=False)
-                       (shape=[NUM_CLASSES]))
-    deconv = tf.nn.bias_add(tf.nn.conv2d_transpose(
-        in_layer, weight, ds, strides=[1, dc, dc, 1], padding='SAME'),
-        bias, name=scope.name)
-    return tf.nn.relu(tf.layers.batch_normalization(deconv, training=training))
+    weights = _variable_with_weight_decay('weights', shape, stddev=0.001, wd=5e-4)
+    deconv = tf.nn.conv2d_transpose(in_layer,
+                                    weights,
+                                    ds,
+                                    strides=[1, dc, dc, 1],
+                                    padding='SAME', name=scope.name)
+    return deconv
 
 
-def inference(images, training=True):
+def inference(images):
     """Build the BBBC006 model.
 
     Args:
@@ -157,9 +192,6 @@ def inference(images, training=True):
     """
     # We instantiate all variables using tf.get_variable() instead of
     # tf.Variable() in order to share variables across multiple GPU training runs.
-    # If we only ran this model on a single GPU, we could simplify this function
-    # by replacing all instances of tf.get_variable() with tf.Variable().
-    #
     features = FEAT_ROOT
     in_layer = images
 
@@ -176,8 +208,9 @@ def inference(images, training=True):
         with tf.variable_scope('conv{}'.format(layer + 1)) as scope:
             # Double the number of features for all but convolution layer 4
             features *= 2 if layer != 4 else 1
+            channels = features if layer == 4 else (features // 2 if layer > 0 else 1)
 
-            conv = conv_layer(in_layer, features, scope, training, layer)
+            conv = _conv_layer(in_layer, features, channels, scope, layer)
             _activation_summary(conv)
 
         # POOLING
@@ -194,13 +227,13 @@ def inference(images, training=True):
             for i in range(2):
                 # TRANSPOSED CONVOLUTION
                 with tf.variable_scope('deconv{0}_{1}'.format(layer + 1, i)) as scope:
-                    deconv = deconv_layer(in_layer, dc, ds, scope, training)
+                    deconv = _deconv_layer(in_layer, dc, ds, scope)
                     _activation_summary(deconv)
 
                 # OUTPUT
                 with tf.variable_scope('output{0}_{1}'.format(layer + 1, i)) as scope:
-                    output = tf.layers.conv2d(deconv, 2, (1, 1), activation=tf.nn.relu,
-                                              padding='same', name=scope.name)
+                    output = tf.layers.conv2d(deconv, 2, (1, 1), padding='same',
+                                              name=scope.name)
 
                     if i == 0:
                         c_outputs.append(output)
@@ -219,7 +252,7 @@ def add_cross_entropy(labels, logits, pref, layer):
             labels=flat_labels, logits=flat_logits,
             name='{0}_cross_entropy_per_example{1}'.format(pref, layer))
         cross_entropy_mean = tf.reduce_mean(cross_entropy, name=scope.name)
-        if layer < 2:
+        if layer < 2:  # This is not the last layer, so apply discount weight to its loss
             cross_entropy_mean *= DISCOUNT_WEIGHT
         tf.add_to_collection('losses', cross_entropy_mean)
 
@@ -341,7 +374,10 @@ def get_dice_coef(logits, labels, smooth=1e-5):
                            tf.reduce_sum(labels) + smooth))
 
 
-def dice_op(c_fuse, s_fuse, labels, threshold=0.5):
+def dice_op(c_outputs, s_outputs, labels, threshold=0.5):
+    # Compute, view, and threshold logits
+    c_fuse = tf.concat(c_outputs, axis=-1)
+    s_fuse = tf.concat(s_outputs, axis=-1)
     _, c_logits = tf.split(tf.nn.softmax(c_fuse), 2, 3)
     _, s_logits = tf.split(tf.nn.softmax(s_fuse), 2, 3)
 
@@ -351,6 +387,7 @@ def dice_op(c_fuse, s_fuse, labels, threshold=0.5):
     c_logits = tf.cast(c_logits > threshold, tf.float32)
     s_logits = tf.cast(s_logits > threshold, tf.float32)
 
+    # Get and view labels
     labels = tf.cast(labels, tf.float32)
     c_labels, s_labels = tf.split(labels, 2, 3)
 
