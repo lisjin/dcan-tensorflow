@@ -28,11 +28,11 @@ import bbbc006
 
 FLAGS = tf.app.flags.FLAGS
 
-tf.app.flags.DEFINE_string('eval_dir', '/tmp/bbbc006_eval',
+tf.app.flags.DEFINE_string('eval_dir', 'bbbc006_eval',
                            """Directory where to write event logs.""")
 tf.app.flags.DEFINE_string('eval_data', 'test',
                            """Either 'test' or 'train_eval'.""")
-tf.app.flags.DEFINE_string('checkpoint_dir', '/tmp/bbbc006_train',
+tf.app.flags.DEFINE_string('checkpoint_dir', 'bbbc006_train',
                            """Directory where to read model checkpoints.""")
 tf.app.flags.DEFINE_integer('eval_interval_secs', 60 * 5,
                             """How often to run the eval.""")

@@ -2,6 +2,9 @@ BBBC006*/
 checkpoints/
 data/
 .idea/
+bbbc006_train/
+bbbc006_eval/
+venv/
 
 *.mat
 *.csv
