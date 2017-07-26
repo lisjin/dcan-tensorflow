@@ -57,11 +57,11 @@ def tower_loss(scope, images, labels):
     """
 
     # Build inference Graph.
-    c_outputs, s_outputs = bbbc006.inference(images)
+    c_fuse, s_fuse = bbbc006.inference(images)
 
     # Build the portion of the Graph calculating the losses. Note that we will
     # assemble the total_loss using a custom function below.
-    _ = bbbc006.loss(c_outputs, s_outputs, labels)
+    _ = bbbc006.loss(c_fuse, s_fuse, labels)
 
     # Assemble all of the losses for the current tower only.
     losses = tf.get_collection('losses', scope)

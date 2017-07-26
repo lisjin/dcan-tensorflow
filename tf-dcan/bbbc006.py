@@ -45,7 +45,6 @@ NUM_EPOCHS_PER_DECAY = 72.0  # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.001  # Initial learning rate.
 DROPOUT_RATE = 0.5  # Probability for dropout layers.
-DISCOUNT_WEIGHT = 0.1  # Weight for auxiliary classifier loss.
 
 # Constants for the model architecture.
 NUM_LAYERS = 6
@@ -240,24 +239,24 @@ def inference(images):
                     else:
                         s_outputs.append(output)
             dc *= 2
-    return c_outputs, s_outputs
+    c_fuse = tf.add_n(c_outputs)
+    s_fuse = tf.add_n(s_outputs)
+    return c_fuse, s_fuse
 
 
-def add_cross_entropy(labels, logits, pref, layer):
+def _add_cross_entropy(labels, logits, pref):
     flat_labels = tf.reshape(labels, [-1])
     flat_logits = tf.reshape(logits, [-1, 2])
 
-    with tf.variable_scope('{0}_cross_entropy{1}'.format(pref, layer)) as scope:
+    with tf.variable_scope('{}_cross_entropy'.format(pref)) as scope:
         cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
             labels=flat_labels, logits=flat_logits,
-            name='{0}_cross_entropy_per_example{1}'.format(pref, layer))
+            name='{}_cross_entropy_per_example'.format(pref))
         cross_entropy_mean = tf.reduce_mean(cross_entropy, name=scope.name)
-        if layer < 2:  # This is not the last layer, so apply discount weight to its loss
-            cross_entropy_mean *= DISCOUNT_WEIGHT
         tf.add_to_collection('losses', cross_entropy_mean)
 
 
-def loss(c_outputs, s_outputs, labels):
+def loss(c_fuse, s_fuse, labels):
     """Add L2Loss to all the trainable variables.
 
     Add summary for "Loss" and "Loss/avg".
@@ -275,11 +274,8 @@ def loss(c_outputs, s_outputs, labels):
     # Each has shape [FLAGS.batch_size, 696, 520, 1]
     contours_labels, segments_labels = tf.split(labels, 2, 3)
 
-    for pref in ['c', 's']:
-        for layer in range(3):
-            labels = contours_labels if pref == 'c' else segments_labels
-            logits = c_outputs[layer] if pref == 'c' else s_outputs[layer]
-            add_cross_entropy(labels, logits, pref, layer)
+    _add_cross_entropy(contours_labels, c_fuse, 'c')
+    _add_cross_entropy(segments_labels, s_fuse, 's')
 
     return tf.add_n(tf.get_collection('losses'), name='total_loss')
 
@@ -369,23 +365,18 @@ def train(total_loss, global_step):
 
 def get_dice_coef(logits, labels, smooth=1e-5):
     inter = tf.reduce_sum(tf.multiply(logits, labels))
-    return tf.reduce_mean((2 * inter + smooth) /
-                          (tf.reduce_sum(logits) +
-                           tf.reduce_sum(labels) + smooth))
+    l = tf.reduce_sum(logits)
+    r = tf.reduce_sum(labels)
+    return tf.reduce_mean((2. * inter + smooth) / (l + r + smooth))
 
 
-def dice_op(c_outputs, s_outputs, labels, threshold=0.5):
-    # Compute, view, and threshold logits
-    c_fuse = tf.concat(c_outputs, axis=-1)
-    s_fuse = tf.concat(s_outputs, axis=-1)
+def dice_op(c_fuse, s_fuse, labels):
+    # Compute and view logits
     _, c_logits = tf.split(tf.nn.softmax(c_fuse), 2, 3)
     _, s_logits = tf.split(tf.nn.softmax(s_fuse), 2, 3)
 
     tf.summary.image('c_logits', c_logits)
     tf.summary.image('s_logits', s_logits)
-
-    c_logits = tf.cast(c_logits > threshold, tf.float32)
-    s_logits = tf.cast(s_logits > threshold, tf.float32)
 
     # Get and view labels
     labels = tf.cast(labels, tf.float32)
