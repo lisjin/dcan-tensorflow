@@ -49,6 +49,7 @@ DROPOUT_RATE = 0.5  # Probability for dropout layers.
 # Constants for the model architecture.
 NUM_LAYERS = 6
 FEAT_ROOT = 32
+DECONV_ROOT = 8
 NUM_CLASSES = 2
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
@@ -155,32 +156,35 @@ def inputs(eval_data):
     return images, labels
 
 
-def _conv_layer(in_layer, features, channels, scope, layer):
+def _conv_layer(in_layer, features, channels, scope, layer, train):
     weights = _variable_with_weight_decay('weights', shape=[3, 3, channels, features],
-                                          stddev=0.001, wd=5e-4)
+                                          stddev=0.001, wd=None)
     biases = _variable_on_cpu('biases', [features], tf.constant_initializer(0.0))
-    conv = tf.nn.relu(tf.nn.bias_add(tf.nn.conv2d(in_layer,
-                                                  weights,
-                                                  [1, 1, 1, 1],
-                                                  padding='SAME'),
-                                     biases, name=scope.name))
-    if layer > 3:  # Add dropout to layers 5 and 6
+    conv = tf.nn.bias_add(tf.nn.conv2d(in_layer,
+                                       weights,
+                                       [1, 1, 1, 1],
+                                       padding='SAME'),
+                          biases, name=scope.name)
+    conv = tf.nn.relu(conv)
+    if train and layer > 3:  # During training, add dropout to layers 5 and 6
         conv = tf.nn.dropout(conv, keep_prob=DROPOUT_RATE)
     return conv
 
 
-def _deconv_layer(in_layer, dc, ds, scope):
-    shape = [dc * 2, dc * 2, 2, in_layer.get_shape().as_list()[-1]]
-    weights = _variable_with_weight_decay('weights', shape, stddev=0.001, wd=5e-4)
-    deconv = tf.nn.conv2d_transpose(in_layer,
+def _t_conv_layer(in_layer, dc, ds, scope):
+    shape = [dc * 2, dc * 2, NUM_CLASSES, in_layer.get_shape().as_list()[-1]]
+    weights = _variable_with_weight_decay('weights', shape, stddev=0.001, wd=None)
+    biases = _variable_on_cpu('biases', [NUM_CLASSES], tf.constant_initializer(0.0))
+    deconv = tf.nn.bias_add(tf.nn.conv2d_transpose(in_layer,
                                     weights,
                                     ds,
                                     strides=[1, dc, dc, 1],
-                                    padding='SAME', name=scope.name)
+                                    padding='SAME'),
+                            biases, name=scope.name)
     return deconv
 
 
-def inference(images):
+def inference(images, train=True):
     """Build the BBBC006 model.
 
     Args:
@@ -194,13 +198,13 @@ def inference(images):
     features = FEAT_ROOT
     in_layer = images
 
-    dc = 8  # Deconvolution constant: kernel size = 2 * dc, stride = dc
+    dc = DECONV_ROOT  # Deconvolution constant: kernel size = 2 * dc, stride = dc
     ds = [FLAGS.batch_size, bbbc006_input.IMAGE_HEIGHT, bbbc006_input.IMAGE_WIDTH,
           NUM_CLASSES]  # Shape of deconvolution output
 
     # Up-sampled layers 4-6 output maps for contours and segments, respectively
-    c_outputs = []
-    s_outputs = []
+    c_deconvs = []
+    s_deconvs = []
 
     for layer in range(NUM_LAYERS):
         # CONVOLUTION
@@ -209,7 +213,7 @@ def inference(images):
             features *= 2 if layer != 4 else 1
             channels = features if layer == 4 else (features // 2 if layer > 0 else 1)
 
-            conv = _conv_layer(in_layer, features, channels, scope, layer)
+            conv = _conv_layer(in_layer, features, channels, scope, layer, train)
             _activation_summary(conv)
 
         # POOLING
@@ -226,31 +230,24 @@ def inference(images):
             for i in range(2):
                 # TRANSPOSED CONVOLUTION
                 with tf.variable_scope('deconv{0}_{1}'.format(layer + 1, i)) as scope:
-                    deconv = _deconv_layer(in_layer, dc, ds, scope)
+                    deconv = _t_conv_layer(in_layer, dc, ds, scope)
                     _activation_summary(deconv)
 
-                # OUTPUT
-                with tf.variable_scope('output{0}_{1}'.format(layer + 1, i)) as scope:
-                    output = tf.layers.conv2d(deconv, 2, (1, 1), padding='same',
-                                              name=scope.name)
-
                     if i == 0:
-                        c_outputs.append(output)
+                        c_deconvs.append(deconv)
                     else:
-                        s_outputs.append(output)
+                        s_deconvs.append(deconv)
             dc *= 2
-    c_fuse = tf.add_n(c_outputs)
-    s_fuse = tf.add_n(s_outputs)
+    c_fuse = tf.add_n(c_deconvs)
+    s_fuse = tf.add_n(s_deconvs)
+
     return c_fuse, s_fuse
 
 
 def _add_cross_entropy(labels, logits, pref):
-    flat_labels = tf.reshape(labels, [-1])
-    flat_logits = tf.reshape(logits, [-1, 2])
-
     with tf.variable_scope('{}_cross_entropy'.format(pref)) as scope:
         cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=flat_labels, logits=flat_logits,
+            labels=tf.squeeze(labels, squeeze_dims=[3]), logits=logits,
             name='{}_cross_entropy_per_example'.format(pref))
         cross_entropy_mean = tf.reduce_mean(cross_entropy, name=scope.name)
         tf.add_to_collection('losses', cross_entropy_mean)
@@ -372,15 +369,16 @@ def get_dice_coef(logits, labels, smooth=1e-5):
 
 def dice_op(c_fuse, s_fuse, labels):
     # Compute and view logits
-    _, c_logits = tf.split(tf.nn.softmax(c_fuse), 2, 3)
-    _, s_logits = tf.split(tf.nn.softmax(s_fuse), 2, 3)
+    c_logits = tf.cast(tf.expand_dims(tf.argmax(c_fuse, dimension=3), dim=3), tf.float32)
+    s_logits = tf.cast(tf.expand_dims(tf.argmax(s_fuse, dimension=3), dim=3), tf.float32)
 
     tf.summary.image('c_logits', c_logits)
     tf.summary.image('s_logits', s_logits)
 
     # Get and view labels
-    labels = tf.cast(labels, tf.float32)
     c_labels, s_labels = tf.split(labels, 2, 3)
+    c_labels = tf.cast(c_labels, tf.float32)
+    s_labels = tf.cast(s_labels, tf.float32)
 
     tf.summary.image('c_labels', c_labels)
     tf.summary.image('s_labels', s_labels)

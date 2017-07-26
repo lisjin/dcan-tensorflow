@@ -106,7 +106,7 @@ def evaluate():
 
         # Build a Graph that computes the logits predictions from the
         # inference model.
-        c_fuse, s_fuse = bbbc006.inference(images)
+        c_fuse, s_fuse = bbbc006.inference(images, train=False)
 
         dice_op = bbbc006.dice_op(c_fuse, s_fuse, labels)
 
