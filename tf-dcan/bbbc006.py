@@ -32,6 +32,14 @@ tf.app.flags.DEFINE_string('data_dir', 'data',
                            """Path to the BBBC006 data directory.""")
 tf.app.flags.DEFINE_boolean('use_fp16', False,
                             """Train the model using fp16.""")
+tf.app.flags.DEFINE_integer('num_layers', 6,
+                            """Number of layers in model.""")
+tf.app.flags.DEFINE_integer('num_classes', 2,
+                            """Number of output classes.""")
+tf.app.flags.DEFINE_integer('feat_root', 32,
+                            """Feature root.""")
+tf.app.flags.DEFINE_integer('deconv_root', 8,
+                            """Transposed convolution upscaling factor.""")
 
 # Global constants describing the BBBC006 data set.
 IMAGE_WIDTH = bbbc006_input.IMAGE_WIDTH
@@ -40,17 +48,13 @@ NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_TRAI
 NUM_EXAMPLES_PER_EPOCH_FOR_EVAL = bbbc006_input.NUM_EXAMPLES_PER_EPOCH_FOR_EVAL
 
 # Constants describing the training process.
-MOVING_AVERAGE_DECAY = 0.9999  # The decay to use for the moving average.
+MOVING_AVERAGE_DECAY = 0.9995  # The decay to use for the moving average.
 NUM_EPOCHS_PER_DECAY = 72.0  # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.001  # Initial learning rate.
 DROPOUT_RATE = 0.5  # Probability for dropout layers.
-
-# Constants for the model architecture.
-NUM_LAYERS = 6
-FEAT_ROOT = 32
-DECONV_ROOT = 8
-NUM_CLASSES = 2
+C_CLASS_PROP = .1638  # Proportion of pixels in class 1 (to handle class imbalance).
+S_CLASS_PROP = .2249
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -108,7 +112,7 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
         name,
         shape,
         tf.truncated_normal_initializer(stddev=stddev, dtype=dtype))
-    if wd is not None:
+    if wd is not None and not tf.get_variable_scope().reuse:
         weight_decay = tf.multiply(tf.nn.l2_loss(var), wd, name='weight_loss')
         tf.add_to_collection('losses', weight_decay)
     return var
@@ -119,7 +123,7 @@ def distorted_inputs():
 
     Returns:
       images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
-      labels: Labels. 1D tensor of [batch_size] size.
+      labels: Labels. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 2] size.
 
     Raises:
       ValueError: If no data_dir
@@ -156,31 +160,38 @@ def inputs(eval_data):
     return images, labels
 
 
-def _conv_layer(in_layer, features, channels, scope, layer, train):
-    weights = _variable_with_weight_decay('weights', shape=[3, 3, channels, features],
-                                          stddev=0.001, wd=None)
-    biases = _variable_on_cpu('biases', [features], tf.constant_initializer(0.0))
-    conv = tf.nn.bias_add(tf.nn.conv2d(in_layer,
-                                       weights,
-                                       [1, 1, 1, 1],
-                                       padding='SAME'),
-                          biases, name=scope.name)
+def _conv_layer(in_layer, w, b, scope, layer, train):
+    conv = tf.nn.conv2d(in_layer,
+                        filter=w,
+                        strides=[1, 1, 1, 1],
+                        padding='SAME')
+    conv = tf.nn.bias_add(conv, b, name=scope.name)
     conv = tf.nn.relu(conv)
     if train and layer > 3:  # During training, add dropout to layers 5 and 6
         conv = tf.nn.dropout(conv, keep_prob=DROPOUT_RATE)
+    _activation_summary(conv)
     return conv
 
 
-def _t_conv_layer(in_layer, dc, ds, scope):
-    shape = [dc * 2, dc * 2, NUM_CLASSES, in_layer.get_shape().as_list()[-1]]
-    weights = _variable_with_weight_decay('weights', shape, stddev=0.001, wd=None)
-    biases = _variable_on_cpu('biases', [NUM_CLASSES], tf.constant_initializer(0.0))
-    deconv = tf.nn.bias_add(tf.nn.conv2d_transpose(in_layer,
-                                    weights,
-                                    ds,
+def _pool_layer(in_layer, layer):
+    pool = tf.nn.max_pool(in_layer,
+                          ksize=[1, 2, 2, 1],
+                          strides=[1, 2, 2, 1],
+                          padding='SAME',
+                          name='pool{}'.format(layer + 1))
+    _activation_summary(pool)
+    return pool
+
+
+def _deconv_layer(in_layer, w, b, dc, ds, scope):
+    deconv = tf.nn.conv2d_transpose(in_layer,
+                                    filter=w,
+                                    output_shape=ds,
                                     strides=[1, dc, dc, 1],
-                                    padding='SAME'),
-                            biases, name=scope.name)
+                                    padding='SAME')
+    deconv = tf.nn.bias_add(deconv, bias=b, name=scope.name)
+    deconv = tf.nn.relu(deconv)
+    _activation_summary(deconv)
     return deconv
 
 
@@ -191,37 +202,40 @@ def inference(images, train=True):
       images: Images returned from distorted_inputs() or inputs().
 
     Returns:
-      output_maps: List of output_map 4D tensors of [batch_size, 696, 520, 1]
+      c_fuse: List of fused contour 4D tensors of [batch_size, 696, 520, 1]
+      s_fuse: List of fused segment 4D tensors of [batch_size, 696, 520, 1]
     """
     # We instantiate all variables using tf.get_variable() instead of
     # tf.Variable() in order to share variables across multiple GPU training runs.
-    features = FEAT_ROOT
+    feat_out = FLAGS.feat_root
     in_layer = images
 
-    dc = DECONV_ROOT  # Deconvolution constant: kernel size = 2 * dc, stride = dc
+    dc = FLAGS.deconv_root  # Deconvolution constant: kernel size = 2 * dc, stride = dc
     ds = [FLAGS.batch_size, bbbc006_input.IMAGE_HEIGHT, bbbc006_input.IMAGE_WIDTH,
-          NUM_CLASSES]  # Shape of deconvolution output
+          FLAGS.num_classes]  # Deconvolution output shape
 
     # Up-sampled layers 4-6 output maps for contours and segments, respectively
     c_deconvs = []
     s_deconvs = []
 
-    for layer in range(NUM_LAYERS):
+    for layer in range(FLAGS.num_layers):
         # CONVOLUTION
         with tf.variable_scope('conv{}'.format(layer + 1)) as scope:
-            # Double the number of features for all but convolution layer 4
-            features *= 2 if layer != 4 else 1
-            channels = features if layer == 4 else (features // 2 if layer > 0 else 1)
+            # Double the number of feat_out for all but convolution layer 4
+            feat_out *= 2 if layer != 4 else 1
 
-            conv = _conv_layer(in_layer, features, channels, scope, layer, train)
-            _activation_summary(conv)
+            # Number of input dimensions from last layer
+            feat_in = feat_out if layer == 4 else (feat_out // 2 if layer > 0 else 1)
+
+            w = _variable_with_weight_decay('weights', shape=[3, 3, feat_in, feat_out],
+                                            stddev=0.01, wd=None)
+            b = _variable_on_cpu('biases', [feat_out], tf.constant_initializer(0.1))
+            conv = _conv_layer(in_layer, w, b, scope, layer, train)
 
         # POOLING
-        if 0 < layer:  # Convolution layer 0 has no max pooling afterwards
-            pool = tf.layers.max_pooling2d(conv, (2, 2), (2, 2), padding='same',
-                                           name='pool{}'.format(layer + 1))
+        if 0 < layer:  # Convolution layer 0 has no pooling afterwards
+            pool = _pool_layer(conv, layer)
             in_layer = pool
-            _activation_summary(pool)
         else:
             in_layer = conv
 
@@ -230,8 +244,13 @@ def inference(images, train=True):
             for i in range(2):
                 # TRANSPOSED CONVOLUTION
                 with tf.variable_scope('deconv{0}_{1}'.format(layer + 1, i)) as scope:
-                    deconv = _t_conv_layer(in_layer, dc, ds, scope)
-                    _activation_summary(deconv)
+                    feat_in = in_layer.get_shape().as_list()[-1]
+                    shape = [dc * 2, dc * 2, FLAGS.num_classes, feat_in]
+                    w = _variable_with_weight_decay('weights', shape, stddev=0.01,
+                                                    wd=None)
+                    b = _variable_on_cpu('biases', [FLAGS.num_classes],
+                                         tf.constant_initializer(0.1))
+                    deconv = _deconv_layer(in_layer, w, b, dc, ds, scope)
 
                     if i == 0:
                         c_deconvs.append(deconv)
@@ -246,10 +265,15 @@ def inference(images, train=True):
 
 def _add_cross_entropy(labels, logits, pref):
     with tf.variable_scope('{}_cross_entropy'.format(pref)) as scope:
-        cross_entropy = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            labels=tf.squeeze(labels, squeeze_dims=[3]), logits=logits,
-            name='{}_cross_entropy_per_example'.format(pref))
-        cross_entropy_mean = tf.reduce_mean(cross_entropy, name=scope.name)
+        class_prop = C_CLASS_PROP if pref == 'c' else S_CLASS_PROP
+        weight_per_label = tf.scalar_mul(class_prop, tf.cast(tf.equal(labels, 0),
+                                                             tf.float32)) + \
+                           tf.scalar_mul(1.0 - class_prop, tf.cast(tf.equal(labels, 1),
+                                                                   tf.float32))
+        cross_entropy = tf.losses.sparse_softmax_cross_entropy(
+            labels=tf.squeeze(labels, squeeze_dims=[3]), logits=logits)
+        cross_entropy_weighted = tf.multiply(weight_per_label, cross_entropy)
+        cross_entropy_mean = tf.reduce_mean(cross_entropy_weighted, name=scope.name)
         tf.add_to_collection('losses', cross_entropy_mean)
 
 
@@ -335,7 +359,7 @@ def train(total_loss, global_step):
     # Compute gradients.
     with tf.control_dependencies([loss_averages_op]):
         opt = tf.train.MomentumOptimizer(learning_rate=lr, momentum=0.2)
-        grads = opt.compute_gradients(total_loss)
+        grads = opt.compute_gradients(total_loss, var_list=tf.trainable_variables())
 
     # Apply gradients.
     apply_gradient_op = opt.apply_gradients(grads, global_step=global_step)
@@ -360,28 +384,40 @@ def train(total_loss, global_step):
     return train_op
 
 
-def get_dice_coef(logits, labels, smooth=1e-5):
-    inter = tf.reduce_sum(tf.multiply(logits, labels))
-    l = tf.reduce_sum(logits)
-    r = tf.reduce_sum(labels)
-    return tf.reduce_mean((2. * inter + smooth) / (l + r + smooth))
+def get_show_preds(c_fuse, s_fuse):
+    """Compute and view logits"""
+    _, c_logits = tf.split(tf.cast(tf.nn.softmax(c_fuse), tf.float32), 2, 3)
+    _, s_logits = tf.split(tf.cast(tf.nn.softmax(s_fuse), tf.float32), 2, 3)
+
+    c_logits_img = tf.cast(tf.multiply(c_logits, 255.0), tf.uint8)
+    s_logits_img = tf.cast(tf.multiply(s_logits, 255.0), tf.uint8)
+
+    tf.summary.image('c_logits', c_logits_img)
+    tf.summary.image('s_logits', s_logits_img)
+    return c_logits, s_logits
 
 
-def dice_op(c_fuse, s_fuse, labels):
-    # Compute and view logits
-    c_logits = tf.cast(tf.expand_dims(tf.argmax(c_fuse, dimension=3), dim=3), tf.float32)
-    s_logits = tf.cast(tf.expand_dims(tf.argmax(s_fuse, dimension=3), dim=3), tf.float32)
-
-    tf.summary.image('c_logits', c_logits)
-    tf.summary.image('s_logits', s_logits)
-
-    # Get and view labels
+def get_show_labels(labels):
+    """Get and view labels"""
     c_labels, s_labels = tf.split(labels, 2, 3)
     c_labels = tf.cast(c_labels, tf.float32)
     s_labels = tf.cast(s_labels, tf.float32)
 
     tf.summary.image('c_labels', c_labels)
     tf.summary.image('s_labels', s_labels)
+    return c_labels, s_labels
+
+
+def get_dice_coef(logits, labels, smooth=1e-5):
+    inter = tf.reduce_sum(tf.multiply(logits, labels))
+    l = tf.reduce_sum(logits)
+    r = tf.reduce_sum(labels)
+    return tf.reduce_mean((2.0 * inter + smooth) / (l + r + smooth))
+
+
+def dice_op(c_fuse, s_fuse, labels):
+    c_logits, s_logits = get_show_preds(c_fuse, s_fuse)
+    c_labels, s_labels = get_show_labels(labels)
 
     c_dice = get_dice_coef(c_logits, c_labels)
     s_dice = get_dice_coef(s_logits, s_labels)

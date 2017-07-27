@@ -75,7 +75,6 @@ def eval_once(saver, dice_op, summary_writer, summary_op):
             step = 0
             while step < num_iter and not coord.should_stop():
                 c_dice, s_dice = sess.run(dice_op)
-                print('%d: c_dice = %.3f, s_dice = %.3f' % (step, c_dice, s_dice))
                 true_c_dice += c_dice
                 true_s_dice += s_dice
                 step += 1

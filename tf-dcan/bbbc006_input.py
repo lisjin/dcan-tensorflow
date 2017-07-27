@@ -63,11 +63,6 @@ def read_bbbc006(all_files_queue):
 
     result = BBBC006Record()
 
-    # Dimensions of the images in the BBBC006 dataset.
-    result.height = 520
-    result.width = 696
-    result.depth = 1
-
     # Read a record, getting filenames from the filename_queue.
     text_reader = tf.TextLineReader()
     _, csv_content = text_reader.read(all_files_queue)
@@ -223,8 +218,8 @@ def inputs(eval_data, batch_size):
     float_image = tf.image.per_image_standardization(reshaped_image)
 
     # Set the shapes of tensors.
-    float_image.set_shape([read_input.height, read_input.width, 1])
-    read_input.label.set_shape([read_input.height, read_input.width, 2])
+    float_image.set_shape([IMAGE_HEIGHT, IMAGE_WIDTH, 1])
+    read_input.label.set_shape([IMAGE_HEIGHT, IMAGE_WIDTH, 2])
 
     # Set max intensity to 1
     read_input.label = tf.cast(tf.divide(read_input.label, 255), tf.int32)
@@ -235,6 +230,7 @@ def inputs(eval_data, batch_size):
                              min_fraction_of_examples_in_queue)
 
     # Generate a batch of images and labels by building up a queue of examples.
+    shuffle = False if eval_data else True
     return _generate_image_and_label_batch(float_image, read_input.label,
                                            min_queue_examples, batch_size,
-                                           shuffle=False)
+                                           shuffle=shuffle)
