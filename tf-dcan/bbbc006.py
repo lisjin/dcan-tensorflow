@@ -72,9 +72,7 @@ def _activation_summary(x):
     Creates a summary that measures the sparsity of activations.
 
     Args:
-      x: Tensor
-    Returns:
-      nothing
+        x: Tensor
     """
     # Remove 'tower_[0-9]/' from the name in case this is a multi-GPU training
     # session. This helps the clarity of presentation on tensorboard.
@@ -86,11 +84,11 @@ def _activation_summary(x):
 def _variable_on_cpu(name, shape, initializer):
     """Helper to create a Variable stored on CPU memory.
     Args:
-      name: name of the variable
-      shape: list of ints
-      initializer: initializer for Variable
+        name: name of the variable
+        shape: list of ints
+        initializer: initializer for Variable
     Returns:
-      Variable Tensor
+        Variable Tensor
     """
     dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
     var = tf.get_variable(name, shape, initializer=initializer, dtype=dtype)
@@ -102,13 +100,13 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
     Note that the Variable is initialized with a truncated normal distribution.
     A weight decay is added only if one is specified.
     Args:
-      name: name of the variable
-      shape: list of ints
-      stddev: standard deviation of a truncated Gaussian
-      wd: add L2Loss weight decay multiplied by this float. If None, weight
-          decay is not added for this Variable.
+        name: name of the variable
+        shape: list of ints
+        stddev: standard deviation of a truncated Gaussian
+        wd: add L2Loss weight decay multiplied by this float. If None, weight
+            decay is not added for this Variable.
     Returns:
-      Variable Tensor
+        Variable Tensor
     """
     dtype = tf.float16 if FLAGS.use_fp16 else tf.float32
     var = _variable_on_cpu(
@@ -125,11 +123,10 @@ def distorted_inputs():
     """Construct distorted input for BBBC006 training using the Reader ops.
 
     Returns:
-      images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
-      labels: Labels. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 2] size.
-
+        images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
+        labels: Labels. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 2] size.
     Raises:
-      ValueError: If no data_dir
+        ValueError: If no data_dir
     """
     if not FLAGS.data_dir:
         raise ValueError('Please supply a data_dir')
@@ -144,14 +141,13 @@ def inputs(eval_data):
     """Construct input for BBBC006 evaluation using the Reader ops.
 
     Args:
-      eval_data: bool, indicating if one should use the train or eval data set.
-
+        eval_data: bool, indicating if one should use the train or eval data set.
     Returns:
-      images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
-      labels: Labels. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 2] size.
+        images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
+        labels: Labels. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 2] size.
 
     Raises:
-      ValueError: If no data_dir
+        ValueError: If no data_dir
     """
     if not FLAGS.data_dir:
         raise ValueError('Please supply a data_dir')
@@ -165,7 +161,13 @@ def inputs(eval_data):
 
 def get_deconv_filter(shape):
     """Return deconvolution weight tensor w/bilinear interpolation.
-    Source: https://github.com/MarvinTeichmann/tensorflow-fcn/blob/master/fcn16.vgg.py
+    Args:
+        shape: 4D list of weight tensor shape.
+    Returns:
+        Tensor containing weight variable.
+
+    Source:
+        https://github.com/MarvinTeichmann/tensorflow-fcn/blob/master/fcn16_vgg.py#L245
     """
     width = shape[0]
     height = shape[0]
@@ -198,11 +200,10 @@ def inference(images, train=True):
     """Build the BBBC006 model.
 
     Args:
-      images: Images returned from distorted_inputs() or inputs().
-
+        images: Images returned from distorted_inputs() or inputs().
     Returns:
-      c_fuse: List of fused contour 4D tensors of [batch_size, 696, 520, 1]
-      s_fuse: List of fused segment 4D tensors of [batch_size, 696, 520, 1]
+        c_fuse: List of fused contour 4D tensors of [batch_size, 696, 520, 1] size.
+        s_fuse: List of fused segment 4D tensors of [batch_size, 696, 520, 1] size.
     """
     # We instantiate all variables using tf.get_variable() instead of
     # tf.Variable() in order to share variables across multiple GPU training runs.
@@ -287,9 +288,9 @@ def loss(c_fuse, s_fuse, labels):
 
     Add summary for "Loss" and "Loss/avg".
     Args:
-      c_fuse: Contours output map from inference().
-      s_fuse: Segments output map from inference().
-      labels: Labels from distorted_inputs or inputs()
+        c_fuse: Contours output map from inference().
+        s_fuse: Segments output map from inference().
+        labels: Labels from distorted_inputs or inputs().
 
     Returns:
       Loss tensor of type float.
@@ -313,9 +314,9 @@ def _add_loss_summaries(total_loss):
     visualizing the performance of the network.
 
     Args:
-      total_loss: Total loss from loss().
+        total_loss: Total loss from loss().
     Returns:
-      loss_averages_op: op for generating moving averages of losses.
+        loss_averages_op: op for generating moving averages of losses.
     """
     # Compute the moving average of all individual losses and the total loss.
     loss_averages = tf.train.ExponentialMovingAverage(0.9, name='avg')
@@ -340,11 +341,11 @@ def train(total_loss, global_step):
     average for all trainable variables.
 
     Args:
-      total_loss: Total loss from loss().
-      global_step: Integer Variable counting the number of training steps
+        total_loss: Total loss from loss().
+        global_step: Integer Variable counting the number of training steps
         processed.
     Returns:
-      train_op: op for training.
+        train_op: op for training.
     """
     # Variables that affect learning rate.
     num_batches_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN / FLAGS.batch_size
@@ -390,7 +391,15 @@ def train(total_loss, global_step):
 
 
 def get_show_preds(c_fuse, s_fuse):
-    """Compute and view logits"""
+    """Compute and view logits.
+    Args:
+        c_fuse: Contours fuse layer.
+        s_fuse: Segments fuse layer.
+    Returns:
+        c_logits: Softmax applied to contours fuse layer.
+        s_logits: Softmax applied to segments fuse layer.
+    """
+    # Index 1 of fuse layers correspond to foreground, so discard index 0.
     _, c_logits = tf.split(tf.cast(tf.nn.softmax(c_fuse), tf.float32), 2, 3)
     _, s_logits = tf.split(tf.cast(tf.nn.softmax(s_fuse), tf.float32), 2, 3)
 
@@ -400,7 +409,7 @@ def get_show_preds(c_fuse, s_fuse):
 
 
 def get_show_labels(labels):
-    """Get and view labels"""
+    """Get and view labels."""
     c_labels, s_labels = tf.split(labels, 2, 3)
     c_labels = tf.cast(c_labels, tf.float32)
     s_labels = tf.cast(s_labels, tf.float32)
@@ -410,7 +419,18 @@ def get_show_labels(labels):
     return c_labels, s_labels
 
 
-def get_dice_coef(logits, labels, smooth=1e-5):
+def get_dice_coef(logits, labels):
+    """Compute dice coefficient.
+    Args:
+        logits: Softmax probability applied to fuse layers.
+        labels: Correct annotations (0 or 1).
+    Returns:
+        Mean dice coefficient over full tensor.
+
+    Source:
+        https://github.com/zsdonghao/tensorlayer/blob/master/tensorlayer/cost.py#L125
+    """
+    smooth = 1e-5
     inter = tf.reduce_sum(tf.multiply(logits, labels))
     l = tf.reduce_sum(logits)
     r = tf.reduce_sum(labels)
@@ -418,6 +438,15 @@ def get_dice_coef(logits, labels, smooth=1e-5):
 
 
 def dice_op(c_fuse, s_fuse, labels):
+    """
+    Args:
+        c_fuse: Contours output map from inference().
+        s_fuse: Segments output map from inference().
+        labels: Labels from distorted_inputs or inputs().
+    Returns:
+        c_dice: Float representing average dice coefficient for contours.
+        s_dice: Float representing average dice coefficient for segments.
+    """
     c_logits, s_logits = get_show_preds(c_fuse, s_fuse)
     c_labels, s_labels = get_show_labels(labels)
 

@@ -46,9 +46,9 @@ def eval_once(saver, dice_op, summary_writer, summary_op):
     """Run Eval once.
 
     Args:
-      saver: Saver.
-      summary_writer: Summary writer.
-      summary_op: Summary op.
+        saver: Saver.
+        summary_writer: Summary writer.
+        summary_op: Summary op.
     """
     with tf.Session() as sess:
         ckpt = tf.train.get_checkpoint_state(FLAGS.checkpoint_dir)

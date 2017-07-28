@@ -45,17 +45,12 @@ def read_bbbc006(all_files_queue):
     examples.
 
     Args:
-      filename_queue: A queue of strings with the filenames to read from.
-
+        filename_queue: A queue of strings with the filenames to read from.
     Returns:
-      An object representing a single example, with the following fields:
-        height: number of rows in the result (32)
-        width: number of columns in the result (32)
-        depth: number of color channels in the result (3)
-        key: a scalar string Tensor describing the filename & record number
-          for this example.
-        label: an int32 Tensor with the label in the range 0..9.
-        uint8image: a [height, width, depth] uint8 Tensor with the image data
+        An object representing a single example, with the following fields:
+            label: a [height, width, 2] uint8 Tensor with contours tensor in depth 0 and
+                segments tensor in depth 1.
+            uint8image: a [height, width, depth] uint8 Tensor with the image data
     """
 
     class BBBC006Record(object):
@@ -83,16 +78,15 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
     """Construct a queued batch of images and labels.
 
     Args:
-      image: 3-D Tensor of [height, width, 1] of type.float32.
-      label: 3-D Tensor of [height, width, 1] of type.int32.
-      min_queue_examples: int32, minimum number of samples to retain
-        in the queue that provides of batches of examples.
-      batch_size: Number of images per batch.
-      shuffle: boolean indicating whether to use a shuffling queue.
-
+        image: 3-D Tensor of [height, width, 1] of type.float32.
+        label: 3-D Tensor of [height, width, 1] of type.int32.
+        min_queue_examples: int32, minimum number of samples to retain
+            in the queue that provides of batches of examples.
+        batch_size: Number of images per batch.
+        shuffle: boolean indicating whether to use a shuffling queue.
     Returns:
-      images: Images. 4D tensor of [batch_size, height, width, 1] size.
-      labels: Labels. 4D tensor of [batch_size, height, width, 1] size.
+        images: Images. 4D tensor of [batch_size, height, width, 1] size.
+        labels: Labels. 4D tensor of [batch_size, height, width, 2] size.
     """
     # Create a queue that shuffles the examples, and then
     # read 'batch_size' images + labels from the example queue.
@@ -120,9 +114,9 @@ def _generate_image_and_label_batch(image, label, min_queue_examples,
 def gen_csv_paths(data_dir, pref):
     """
     Generate CSV file from image, contour, and segment file paths.
-    :param data_dir: BBBC006 data directory path.
-    :param pref: Prefix (either 'train' or 'test')
-    :return: Nothing.
+    Args:
+        data_dir: BBBC006 data directory path.
+        pref: Prefix (either 'train' or 'test')
     """
     filenames = get_png_files(os.path.join(data_dir, 'BBBC006_v1_' + pref))
     contours = get_png_files(os.path.join(data_dir, 'BBBC006_v1_contours_'
@@ -136,6 +130,14 @@ def gen_csv_paths(data_dir, pref):
 
 
 def get_read_input(eval_data=False):
+    """
+    Fetch input data row by row from CSV files.
+    Args:
+        eval_data: Bool representing whether to read from train or test directories.
+    Returns:
+        read_input: An object representing a single example.
+        reshaped_image: Image of type tf.float32, reshaped to correct dimensions.
+    """
     # Create queues that produce the filenames and labels to read.
     pref = 'test' if eval_data else 'train'
     all_files_queue = tf.train.string_input_producer([pref + '.csv'])
@@ -148,52 +150,6 @@ def get_read_input(eval_data=False):
     return read_input, reshaped_image
 
 
-def distorted_inputs(batch_size):
-    """Construct distorted input for BBBC006 training using the Reader ops.
-
-    Args:
-      batch_size: Number of images per batch.
-
-    Returns:
-      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 2] size.
-      labels: Labels. 1D tensor of [batch_size] size.
-    """
-    read_input, reshaped_image = get_read_input()
-
-    # Image processing for training the network. Note the many random
-    # distortions applied to the image.
-    # Because these operations are not commutative, consider randomizing
-    # the order their operation.
-    # NOTE: since per_image_standardization zeros the mean and makes
-    # the stddev unit, this likely has no effect see tensorflow#1458.
-    distorted_image = tf.image.random_brightness(reshaped_image,
-                                                 max_delta=63)
-    distorted_image = tf.image.random_contrast(distorted_image,
-                                               lower=0.2, upper=1.8)
-
-    # Subtract off the mean and divide by the variance of the pixels.
-    float_image = tf.image.per_image_standardization(distorted_image)
-
-    # Set the shapes of tensors.
-    float_image.set_shape([read_input.height, read_input.width, 1])
-    read_input.label.set_shape([read_input.height, read_input.width, 2])
-
-    # Set max intensity to 1
-    read_input.label = tf.cast(tf.divide(read_input.label, 255), tf.int32)
-
-    # Ensure that the random shuffling has good mixing properties.
-    min_fraction_of_examples_in_queue = 0.4
-    min_queue_examples = int(NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN *
-                             min_fraction_of_examples_in_queue)
-    print('Filling queue with %d BBBC006 images before starting to train.'
-          % min_queue_examples)
-
-    # Generate a batch of images and labels by building up a queue of examples.
-    return _generate_image_and_label_batch(float_image, read_input.label,
-                                           min_queue_examples, batch_size,
-                                           shuffle=True)
-
-
 def get_png_files(dirname):
     return [dirname + '/' + f for f in os.listdir(dirname) if f.endswith('.png')]
 
@@ -202,12 +158,11 @@ def inputs(eval_data, batch_size):
     """Construct input for BBBC006 evaluation using the Reader ops.
 
     Args:
-      eval_data: bool, indicating if one should use the train or eval data set.
-      batch_size: Number of images per batch.
-
+        eval_data: bool, indicating if one should use the train or eval data set.
+        batch_size: Number of images per batch.
     Returns:
-      images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 3] size.
-      labels: Labels. 1D tensor of [batch_size] size.
+        images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 1] size.
+        labels: Labels. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 2] size.
     """
     num_examples_per_epoch = NUM_EXAMPLES_PER_EPOCH_FOR_TRAIN
     read_input, reshaped_image = get_read_input(eval_data)
