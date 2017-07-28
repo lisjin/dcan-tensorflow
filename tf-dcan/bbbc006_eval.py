@@ -70,24 +70,24 @@ def eval_once(saver, dice_op, summary_writer, summary_op):
                                                  start=True))
 
             num_iter = int(math.ceil(FLAGS.num_examples / FLAGS.batch_size))
-            true_c_dice = 0  # Counts the number of correct predictions.
-            true_s_dice = 0
+            avg_c_dice = 0
+            avg_s_dice = 0
             step = 0
             while step < num_iter and not coord.should_stop():
                 c_dice, s_dice = sess.run(dice_op)
-                true_c_dice += c_dice
-                true_s_dice += s_dice
+                avg_c_dice += c_dice
+                avg_s_dice += s_dice
                 step += 1
 
-            true_c_dice /= step
-            true_s_dice /= step
-            print('%s: c_dice avg = %.3f' % (datetime.now(), true_c_dice))
-            print('%s: s_dice avg = %.3f' % (datetime.now(), true_s_dice))
+            avg_c_dice /= step
+            avg_s_dice /= step
+            print('%s: c_dice avg = %.3f' % (datetime.now(), avg_c_dice))
+            print('%s: s_dice avg = %.3f' % (datetime.now(), avg_s_dice))
 
             summary = tf.Summary()
             summary.ParseFromString(sess.run(summary_op))
-            summary.value.add(tag='dice_c', simple_value=true_c_dice)
-            summary.value.add(tag='dice_s', simple_value=true_s_dice)
+            summary.value.add(tag='dice_c', simple_value=avg_c_dice)
+            summary.value.add(tag='dice_s', simple_value=avg_s_dice)
             summary_writer.add_summary(summary, global_step)
         except Exception as e:  # pylint: disable=broad-except
             coord.request_stop(e)

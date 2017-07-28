@@ -58,6 +58,7 @@ def train():
         # Build a Graph that computes the logits predictions from the
         # inference model.
         c_fuse, s_fuse = bbbc006.inference(images)
+        bbbc006.get_show_preds(c_fuse, s_fuse)
 
         # Calculate loss.
         loss = bbbc006.loss(c_fuse, s_fuse, labels)

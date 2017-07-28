@@ -21,6 +21,9 @@ from __future__ import print_function
 import re
 
 import tensorflow as tf
+import numpy as np
+import math
+
 import bbbc006_input
 
 FLAGS = tf.app.flags.FLAGS
@@ -53,8 +56,8 @@ NUM_EPOCHS_PER_DECAY = 72.0  # Epochs after which learning rate decays.
 LEARNING_RATE_DECAY_FACTOR = 0.1  # Learning rate decay factor.
 INITIAL_LEARNING_RATE = 0.001  # Initial learning rate.
 DROPOUT_RATE = 0.5  # Probability for dropout layers.
-C_CLASS_PROP = .1638  # Proportion of pixels in class 1 (to handle class imbalance).
-S_CLASS_PROP = .2249
+C_CLASS_PROP = .1638  # Contours proportion of pixels in class 1.
+S_CLASS_PROP = .2249  # Segments proportion of pixels in class 1.
 
 # If a model is trained with multiple GPUs, prefix all Op names with tower_name
 # to differentiate the operations. Note that this prefix is removed from the
@@ -160,34 +163,30 @@ def inputs(eval_data):
     return images, labels
 
 
-def _conv_layer(in_layer, w, b, scope, layer, train):
-    conv = tf.nn.conv2d(in_layer,
-                        filter=w,
-                        strides=[1, 1, 1, 1],
-                        padding='SAME')
-    conv = tf.nn.bias_add(conv, b, name=scope.name)
-    conv = tf.nn.relu(conv)
-    if train and layer > 3:  # During training, add dropout to layers 5 and 6
-        conv = tf.nn.dropout(conv, keep_prob=DROPOUT_RATE)
-    _activation_summary(conv)
-    return conv
+def get_deconv_filter(shape):
+    """Return deconvolution weight tensor w/bilinear interpolation.
+    Source: https://github.com/MarvinTeichmann/tensorflow-fcn/blob/master/fcn16.vgg.py
+    """
+    width = shape[0]
+    height = shape[0]
+    f = math.ceil(width / 2.0)
+    c = (2.0 * f - 1 - f % 2) / (2.0 * f)
 
+    bilinear = np.zeros([shape[0], shape[1]])
+    for x in range(width):
+        for y in range(height):
+            bilinear[x, y] = (1 - abs(x / f - c)) * (1 - abs(y / f - c))
 
-def _pool_layer(in_layer, layer):
-    pool = tf.nn.max_pool(in_layer,
-                          ksize=[1, 2, 2, 1],
-                          strides=[1, 2, 2, 1],
-                          padding='SAME',
-                          name='pool{}'.format(layer + 1))
-    _activation_summary(pool)
-    return pool
+    weights = np.zeros(shape)
+    for i in range(shape[2]):
+        weights[:, :, i, i] = bilinear
+
+    init = tf.constant_initializer(value=weights, dtype=tf.float32)
+    return tf.get_variable(name='up_filter', initializer=init, shape=weights.shape)
 
 
 def _deconv_layer(in_layer, w, b, dc, ds, scope):
-    deconv = tf.nn.conv2d_transpose(in_layer,
-                                    filter=w,
-                                    output_shape=ds,
-                                    strides=[1, dc, dc, 1],
+    deconv = tf.nn.conv2d_transpose(in_layer, w, ds, strides=[1, dc, dc, 1],
                                     padding='SAME')
     deconv = tf.nn.bias_add(deconv, bias=b, name=scope.name)
     deconv = tf.nn.relu(deconv)
@@ -215,26 +214,28 @@ def inference(images, train=True):
           FLAGS.num_classes]  # Deconvolution output shape
 
     # Up-sampled layers 4-6 output maps for contours and segments, respectively
-    c_deconvs = []
-    s_deconvs = []
+    c_outputs = []
+    s_outputs = []
 
     for layer in range(FLAGS.num_layers):
         # CONVOLUTION
         with tf.variable_scope('conv{}'.format(layer + 1)) as scope:
             # Double the number of feat_out for all but convolution layer 4
             feat_out *= 2 if layer != 4 else 1
+            conv = tf.layers.conv2d(in_layer, feat_out, (3, 3), padding='same',
+                                    activation=tf.nn.relu, name=scope.name)
 
-            # Number of input dimensions from last layer
-            feat_in = feat_out if layer == 4 else (feat_out // 2 if layer > 0 else 1)
+            if train and layer > 3:  # During training, add dropout to layers 5 and 6
+                conv = tf.nn.dropout(conv, keep_prob=DROPOUT_RATE)
 
-            w = _variable_with_weight_decay('weights', shape=[3, 3, feat_in, feat_out],
-                                            stddev=0.01, wd=None)
-            b = _variable_on_cpu('biases', [feat_out], tf.constant_initializer(0.1))
-            conv = _conv_layer(in_layer, w, b, scope, layer, train)
+            _activation_summary(conv)
 
         # POOLING
-        if 0 < layer:  # Convolution layer 0 has no pooling afterwards
-            pool = _pool_layer(conv, layer)
+        # First and last convolution layers have no pooling afterwards
+        if 0 < layer:
+            pool = tf.layers.max_pooling2d(conv, 2, 2, padding='same')
+
+            _activation_summary(pool)
             in_layer = pool
         else:
             in_layer = conv
@@ -246,19 +247,23 @@ def inference(images, train=True):
                 with tf.variable_scope('deconv{0}_{1}'.format(layer + 1, i)) as scope:
                     feat_in = in_layer.get_shape().as_list()[-1]
                     shape = [dc * 2, dc * 2, FLAGS.num_classes, feat_in]
-                    w = _variable_with_weight_decay('weights', shape, stddev=0.01,
-                                                    wd=None)
+                    w = get_deconv_filter(shape)
                     b = _variable_on_cpu('biases', [FLAGS.num_classes],
                                          tf.constant_initializer(0.1))
+
                     deconv = _deconv_layer(in_layer, w, b, dc, ds, scope)
 
+                with tf.variable_scope('output{0}_{1}'.format(layer + 1, i)) as scope:
+                    output = tf.layers.conv2d(deconv, FLAGS.num_classes, (1, 1),
+                                              padding='same', activation=tf.nn.relu,
+                                              name=scope.name)
                     if i == 0:
-                        c_deconvs.append(deconv)
+                        c_outputs.append(output)
                     else:
-                        s_deconvs.append(deconv)
+                        s_outputs.append(output)
             dc *= 2
-    c_fuse = tf.add_n(c_deconvs)
-    s_fuse = tf.add_n(s_deconvs)
+    c_fuse = tf.add_n(c_outputs)
+    s_fuse = tf.add_n(s_outputs)
 
     return c_fuse, s_fuse
 
@@ -389,11 +394,8 @@ def get_show_preds(c_fuse, s_fuse):
     _, c_logits = tf.split(tf.cast(tf.nn.softmax(c_fuse), tf.float32), 2, 3)
     _, s_logits = tf.split(tf.cast(tf.nn.softmax(s_fuse), tf.float32), 2, 3)
 
-    c_logits_img = tf.cast(tf.multiply(c_logits, 255.0), tf.uint8)
-    s_logits_img = tf.cast(tf.multiply(s_logits, 255.0), tf.uint8)
-
-    tf.summary.image('c_logits', c_logits_img)
-    tf.summary.image('s_logits', s_logits_img)
+    tf.summary.image('c_logits', c_logits)
+    tf.summary.image('s_logits', s_logits)
     return c_logits, s_logits
 
 
