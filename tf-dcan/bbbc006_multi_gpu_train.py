@@ -46,7 +46,6 @@ tf.logging.set_verbosity(tf.logging.DEBUG)
 
 def tower_loss(scope, images, labels):
     """Calculate the total loss on a single tower running the BBBC006 model.
-
     Args:
       scope: unique prefix string identifying the BBBC006 tower, e.g. 'tower_0'
       images: Images. 4D tensor of shape [batch_size, height, width, 3].
@@ -82,7 +81,6 @@ def tower_loss(scope, images, labels):
 
 def average_gradients(tower_grads):
     """Calculate the average gradient for each shared variable across all towers.
-
     Note that this function provides a synchronization point across all towers.
 
     Args:

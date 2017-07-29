@@ -67,7 +67,6 @@ TOWER_NAME = 'tower'
 
 def _activation_summary(x):
     """Helper to create summaries for activations.
-
     Creates a summary that provides a histogram of activations.
     Creates a summary that measures the sparsity of activations.
 
@@ -121,7 +120,6 @@ def _variable_with_weight_decay(name, shape, stddev, wd):
 
 def distorted_inputs():
     """Construct distorted input for BBBC006 training using the Reader ops.
-
     Returns:
         images: Images. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 1] size.
         labels: Labels. 4D tensor of [batch_size, IMAGE_WIDTH, IMAGE_HEIGHT, 2] size.
@@ -139,7 +137,6 @@ def distorted_inputs():
 
 def inputs(eval_data):
     """Construct input for BBBC006 evaluation using the Reader ops.
-
     Args:
         eval_data: bool, indicating if one should use the train or eval data set.
     Returns:
@@ -188,6 +185,17 @@ def get_deconv_filter(shape):
 
 
 def _deconv_layer(in_layer, w, b, dc, ds, scope):
+    """Return deconvolution layer tensor.
+    Args:
+        in_layer: Input tensor layer.
+        w: Weight tensor.
+        b: Bias tensor.
+        dc: Deconvolution constant.
+        ds: Deconvolution layer output shape in list format.
+        scope: Enclosing variable scope.
+    Returns:
+        Tensor for deconvolution layer.
+    """
     deconv = tf.nn.conv2d_transpose(in_layer, w, ds, strides=[1, dc, dc, 1],
                                     padding='SAME')
     deconv = tf.nn.bias_add(deconv, bias=b, name=scope.name)
@@ -198,21 +206,21 @@ def _deconv_layer(in_layer, w, b, dc, ds, scope):
 
 def inference(images, train=True):
     """Build the BBBC006 model.
-
     Args:
         images: Images returned from distorted_inputs() or inputs().
     Returns:
-        c_fuse: List of fused contour 4D tensors of [batch_size, 696, 520, 1] size.
-        s_fuse: List of fused segment 4D tensors of [batch_size, 696, 520, 1] size.
+        c_fuse: List of fused contours 4D tensors of [batch_size, 696, 520, 2] size.
+        s_fuse: List of fused segments 4D tensors of [batch_size, 696, 520, 2] size.
     """
     # We instantiate all variables using tf.get_variable() instead of
     # tf.Variable() in order to share variables across multiple GPU training runs.
     feat_out = FLAGS.feat_root
     in_layer = images
 
-    dc = FLAGS.deconv_root  # Deconvolution constant: kernel size = 2 * dc, stride = dc
-    ds = [FLAGS.batch_size, bbbc006_input.IMAGE_HEIGHT, bbbc006_input.IMAGE_WIDTH,
-          FLAGS.num_classes]  # Deconvolution output shape
+    # Deconvolution constant: kernel size = 2 * dc, stride = dc
+    # Deconvolution output shape
+    dc = FLAGS.deconv_root
+    ds = [FLAGS.batch_size, IMAGE_HEIGHT, IMAGE_WIDTH, FLAGS.num_classes]
 
     # Up-sampled layers 4-6 output maps for contours and segments, respectively
     c_outputs = []
@@ -232,7 +240,7 @@ def inference(images, train=True):
             _activation_summary(conv)
 
         # POOLING
-        # First and last convolution layers have no pooling afterwards
+        # First and convolution layers has no pooling afterwards
         if 0 < layer:
             pool = tf.layers.max_pooling2d(conv, 2, 2, padding='same')
 
@@ -270,6 +278,12 @@ def inference(images, train=True):
 
 
 def _add_cross_entropy(labels, logits, pref):
+    """Compute average cross entropy and add to loss collection.
+    Args:
+        labels: Single dimension labels from distorted_inputs() or inputs().
+        logits: Output map from inference().
+        pref: Either 'c' or 's', for contours or segments, respectively.
+    """
     with tf.variable_scope('{}_cross_entropy'.format(pref)) as scope:
         class_prop = C_CLASS_PROP if pref == 'c' else S_CLASS_PROP
         weight_per_label = tf.scalar_mul(class_prop, tf.cast(tf.equal(labels, 0),
@@ -285,7 +299,6 @@ def _add_cross_entropy(labels, logits, pref):
 
 def loss(c_fuse, s_fuse, labels):
     """Add L2Loss to all the trainable variables.
-
     Add summary for "Loss" and "Loss/avg".
     Args:
         c_fuse: Contours output map from inference().
@@ -309,7 +322,6 @@ def loss(c_fuse, s_fuse, labels):
 
 def _add_loss_summaries(total_loss):
     """Add summaries for losses in BBBC006 model.
-
     Generates moving average for all losses and associated summaries for
     visualizing the performance of the network.
 
@@ -336,7 +348,6 @@ def _add_loss_summaries(total_loss):
 
 def train(total_loss, global_step):
     """Train BBBC006 model.
-
     Create an optimizer and apply to all trainable variables. Add moving
     average for all trainable variables.
 
@@ -409,7 +420,13 @@ def get_show_preds(c_fuse, s_fuse):
 
 
 def get_show_labels(labels):
-    """Get and view labels."""
+    """Get and view labels.
+    Args:
+        labels: Labels from distorted_inputs or inputs().
+    Returns:
+        c_labels: Contours labels.
+        s_labels: Segments labels.
+    """
     c_labels, s_labels = tf.split(labels, 2, 3)
     c_labels = tf.cast(c_labels, tf.float32)
     s_labels = tf.cast(s_labels, tf.float32)
@@ -438,7 +455,7 @@ def get_dice_coef(logits, labels):
 
 
 def dice_op(c_fuse, s_fuse, labels):
-    """
+    """Compute mean dice coefficient for both contours and segments outputs.
     Args:
         c_fuse: Contours output map from inference().
         s_fuse: Segments output map from inference().

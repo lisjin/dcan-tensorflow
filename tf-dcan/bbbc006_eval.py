@@ -44,7 +44,6 @@ tf.app.flags.DEFINE_boolean('run_once', False,
 
 def eval_once(saver, dice_op, summary_writer, summary_op):
     """Run Eval once.
-
     Args:
         saver: Saver.
         summary_writer: Summary writer.

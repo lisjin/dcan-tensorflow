@@ -38,7 +38,6 @@ def read_from_queue(path):
 
 def read_bbbc006(all_files_queue):
     """Reads and parses examples from BBBC006 data files.
-
     Recommendation: if you want N-way read parallelism, call this function
     N times.  This will give you N independent Readers reading different
     files & positions within those files, which will give better mixing of
@@ -76,7 +75,6 @@ def read_bbbc006(all_files_queue):
 def _generate_image_and_label_batch(image, label, min_queue_examples,
                                     batch_size, shuffle):
     """Construct a queued batch of images and labels.
-
     Args:
         image: 3-D Tensor of [height, width, 1] of type.float32.
         label: 3-D Tensor of [height, width, 1] of type.int32.
@@ -156,7 +154,6 @@ def get_png_files(dirname):
 
 def inputs(eval_data, batch_size):
     """Construct input for BBBC006 evaluation using the Reader ops.
-
     Args:
         eval_data: bool, indicating if one should use the train or eval data set.
         batch_size: Number of images per batch.
