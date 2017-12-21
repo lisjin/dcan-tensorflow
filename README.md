@@ -17,7 +17,7 @@
 
 ## Instructions
 
-All code within `tf-dcan/` was written for the Broad Institute human U2OS cells image set referenced above. This image set contains 34 images at 32 different _z_-indices (from an automated microscope), and are of size 692 x 520.
+All code within `tf-dcan/` was written for the Broad Institute human U2OS cells image set referenced above. This image set contains 384 images at 32 different _z_-indices (from an automated microscope), and are of size 692 x 520.
 
 For running on your own images, you must:
 1. Generate a set of ground truth _contours_ and _segments_ as described in the DCAN paper.
@@ -49,5 +49,6 @@ pip install -r requirements.txt
 ```
 
 2. Run `bbbc006_train.py` (or `bbbc006_multi_gpu_train.py` for multiple GPUs) to train the network.
+	1. Adjust the parameters lines 54-60 of `bbbc006.py` to fit your training data (especially lines 59-60, which deal with class imbalance).
 3. Run `bbbc006_eval.py` for evaluation using dice coefficient.
 4. Use TensorBoard to visualize the results in `/tmp/bbbc006_train` and/or `/tmp/bbbc006_eval` for training and evaluation results, respectively.
