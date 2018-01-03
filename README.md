@@ -5,16 +5,6 @@
 	* Note: in contrast to paper, there is no auxiliary supervision in the upsampled layers
 * Image set: https://data.broadinstitute.org/bbbc/BBBC006/
 
-## Results
-
-### Model Output
-![iter-12650](/../screenshots/iter-12650.png)
-> After 12,650 iterations, the output of the model is on the rightmost column (labels in the middle column).
-
-### TensorBoard Plots
-![dice-coefs.png](/../screenshots/dice-coefs.png)
-> As shown in the dice coefficient plots above, the model continues to improve beyond the results shown above. Left plot is for contours, right for segments.
-
 ## Instructions
 
 All code within `tf-dcan/` was written for the Broad Institute human U2OS cells image set referenced above. This image set contains 384 images at 32 different _z_-indices (from an automated microscope), and are of size 692 x 520.

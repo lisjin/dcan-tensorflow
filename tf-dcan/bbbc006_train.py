@@ -30,6 +30,8 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/bbbc006_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
+tf.app.flags.DEFINE_string('eval_data', 'train',
+                           """Either 'test' or 'train'.""")
 tf.app.flags.DEFINE_integer('max_steps', 40000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_boolean('log_device_placement', False,
@@ -53,7 +55,7 @@ def train():
         # Get images and labels for BBBC006.
         # Force input pipeline to CPU:0 to avoid operations sometimes ending up
         # on GPU and resulting in a slow down.
-        images, labels = bbbc006.inputs(eval_data='train')
+        images, labels = bbbc006.inputs(eval_data=FLAGS.eval_data)
 
         # Build a Graph that computes the logits predictions from the
         # inference model.

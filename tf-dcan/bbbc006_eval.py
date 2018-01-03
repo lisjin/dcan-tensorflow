@@ -99,8 +99,7 @@ def evaluate():
     """Eval BBBC006 for a number of steps."""
     with tf.Graph().as_default() as g:
         # Get images and labels for BBBC006.
-        eval_data = FLAGS.eval_data == 'test'
-        images, labels = bbbc006.inputs(eval_data=eval_data)
+        images, labels = bbbc006.inputs(eval_data=FLAGS.eval_data)
 
         # Build a Graph that computes the logits predictions from the
         # inference model.

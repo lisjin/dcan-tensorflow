@@ -33,6 +33,8 @@ FLAGS = tf.app.flags.FLAGS
 tf.app.flags.DEFINE_string('train_dir', '/tmp/bbbc006_train',
                            """Directory where to write event logs """
                            """and checkpoint.""")
+tf.app.flags.DEFINE_string('eval_data', 'train',
+                           """Either 'test' or 'train'.""")
 tf.app.flags.DEFINE_integer('max_steps', 2000,
                             """Number of batches to run.""")
 tf.app.flags.DEFINE_integer('num_gpus', 2,
@@ -142,7 +144,7 @@ def train():
         opt = tf.train.MomentumOptimizer(learning_rate=lr, momentum=0.2)
 
         # Get images and labels for BBBC006.
-        images, labels = bbbc006.inputs(eval_data='train')
+        images, labels = bbbc006.inputs(eval_data=FLAGS.eval_data)
         batch_queue = tf.contrib.slim.prefetch_queue.prefetch_queue(
             [images, labels], capacity=2 * FLAGS.num_gpus)
         # Calculate the gradients for each model tower.

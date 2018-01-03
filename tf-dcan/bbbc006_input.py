@@ -127,18 +127,17 @@ def gen_csv_paths(data_dir, pref):
     pd_arr.to_csv(pref + '.csv', index=False, header=False)
 
 
-def get_read_input(eval_data=False):
+def get_read_input(eval_data):
     """
     Fetch input data row by row from CSV files.
     Args:
-        eval_data: Bool representing whether to read from train or test directories.
+        eval_data: String representing whether to read from 'train' or 'test' directories.
     Returns:
         read_input: An object representing a single example.
         reshaped_image: Image of type tf.float32, reshaped to correct dimensions.
     """
     # Create queues that produce the filenames and labels to read.
-    pref = 'test' if eval_data else 'train'
-    all_files_queue = tf.train.string_input_producer([pref + '.csv'])
+    all_files_queue = tf.train.string_input_producer([eval_data + '.csv'])
 
     # Read examples from files in the filename queue.
     read_input = read_bbbc006(all_files_queue)
@@ -155,7 +154,7 @@ def get_png_files(dirname):
 def inputs(eval_data, batch_size):
     """Construct input for BBBC006 evaluation using the Reader ops.
     Args:
-        eval_data: bool, indicating if one should use the train or eval data set.
+        eval_data: String representing whether to read from 'train' or 'test' directories.
         batch_size: Number of images per batch.
     Returns:
         images: Images. 4D tensor of [batch_size, IMAGE_SIZE, IMAGE_SIZE, 1] size.
@@ -182,7 +181,7 @@ def inputs(eval_data, batch_size):
                              min_fraction_of_examples_in_queue)
 
     # Generate a batch of images and labels by building up a queue of examples.
-    shuffle = False if eval_data else True
+    shuffle = False if eval_data == 'test' else True
     return _generate_image_and_label_batch(float_image, read_input.label,
                                            min_queue_examples, batch_size,
                                            shuffle=shuffle)
