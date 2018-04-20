@@ -11,7 +11,7 @@ All code within `tf-dcan/` was written for the Broad Institute human U2OS cells 
 
 For running on your own images, you must:
 1. Generate a set of ground truth _contours_ and _segments_ as described in the DCAN paper.
-	1. Use `tf-dcan/traceBounds.m` as a starting point.
+	1. Use `fm-prep/traceBounds.m` as a starting point.
 2. Customize `bbbc006.py` and `bbbc006_input.py` in `dcan-tensorflow/` according to your data (e.g., image dimensions, file type decoding).
 
 To run the code on the U2OS image set, follow all steps in the sections below.
@@ -21,7 +21,7 @@ To run the code on the U2OS image set, follow all steps in the sections below.
 The `fm-prep/` directory contains MATLAB scripts to automatically select the optimal focal plane for each image.
 
 1. Move all directories from the U2OS image set to the repo's root.
-2. Run `fmeasureAll()` in MATLAB to compute each the focus measure of each image.
+2. Run `fmeasureAll()` in MATLAB to compute the focus measure of each image.
 	1. Make sure to [install](https://www.mathworks.com/matlabcentral/fileexchange/27314-focus-measure?focused=8113992&tab=function&requestedDomain=www.mathworks.com) the `fmeasure` function and change line 10 of `fmeasureAll.m` to point to the directory.
 3. Run `saveImgsAll()` in MATLAB to save the detected in-focus images to an output directory called `BBBC006_v1_focused/`.
 	1. Change line 6 of `saveImgs.m` if you want to rename the output directory.
